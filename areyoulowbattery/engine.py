@@ -721,7 +721,12 @@ class BatteryEngine:
             # to 180s (3 minutes) to completely eliminate USB frame contention and latency spikes.
             # In regular desktop mode, rate limit to MIN_QUERY_INTERVAL (5s).
             query_interval = 180.0 if in_game else self.MIN_QUERY_INTERVAL
-            if not force and best_status is None and name in self._recent_queries:
+
+            # HARDWARE SAFETY IN GAME MODE:
+            # When in_game is True, force refresh CANNOT bypass the 180s cache.
+            # This guarantees zero USB write query spikes during matches even if dashboard opens or hotplug fires.
+            allow_force_bypass = force and not in_game
+            if not allow_force_bypass and best_status is None and name in self._recent_queries:
                 r_prof, r_stat, r_ts = self._recent_queries[name]
                 if time.time() - r_ts < query_interval:
                     best_profile, best_status = r_prof, r_stat

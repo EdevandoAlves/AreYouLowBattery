@@ -397,6 +397,13 @@ def run_tray(auto_show: bool = False):
     dashboard_settings_menu.addAction(find_action)
     dashboard_settings_menu.addAction(refresh_action)
     dashboard_settings_menu.addSeparator()
+
+    if sys.platform.startswith("linux"):
+        udev_action = menu.addAction("Configure udev permissions (2.4G)...")
+        from areyoulowbattery.udev_installer import install_udev_rules
+        udev_action.triggered.connect(lambda: install_udev_rules(None))
+        dashboard_settings_menu.addAction(udev_action)
+
     dashboard_settings_menu.addAction(autostart_action)
     dashboard_settings_menu.addAction(diag_action)
     dashboard_settings_menu.addAction(update_action)
@@ -851,10 +858,47 @@ def run_tray(auto_show: bool = False):
                         pass
             except Exception:
                 pass
-        else:
-            # On Windows, Focus Assist / Game Bar normally silences notifications automatically,
-            # but we can check foreground window state if needed.
-            pass
+        elif sys.platform == "win32":
+            try:
+                import ctypes
+                from ctypes import wintypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetForegroundWindow()
+                if hwnd:
+                    class_buf = ctypes.create_unicode_buffer(256)
+                    user32.GetClassNameW(hwnd, class_buf, 256)
+                    c_name = class_buf.value
+                    if c_name not in ("Progman", "WorkerW", "Shell_TrayWnd", "DV2ControlHost"):
+                        pid = wintypes.DWORD()
+                        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                        if pid.value and pid.value != my_pid:
+                            kernel32 = ctypes.windll.kernel32
+                            # PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+                            h_proc = kernel32.OpenProcess(0x1000, False, pid.value)
+                            if h_proc:
+                                try:
+                                    exe_buf = ctypes.create_unicode_buffer(1024)
+                                    buf_size = wintypes.DWORD(1024)
+                                    if kernel32.QueryFullProcessImageNameW(h_proc, 0, exe_buf, ctypes.byref(buf_size)):
+                                        fg_exe = os.path.basename(exe_buf.value).lower()
+                                        if any(sig in fg_exe for sig in ("cs2", "csgo", "dota2", "valorant", "r5apex", "overwatch", "pubg", "fortnite", "deadlock", "steam_app")):
+                                            _cached_game_state = True
+                                            return True
+                                finally:
+                                    kernel32.CloseHandle(h_proc)
+
+                        # Check if foreground window covers primary screen (exclusive or borderless fullscreen)
+                        rect = wintypes.RECT()
+                        if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                            screen_w = user32.GetSystemMetrics(0)  # SM_CXSCREEN
+                            screen_h = user32.GetSystemMetrics(1)  # SM_CYSCREEN
+                            w = rect.right - rect.left
+                            h = rect.bottom - rect.top
+                            if w >= screen_w and h >= screen_h:
+                                _cached_game_state = True
+                                return True
+            except Exception as e:
+                logger.debug("Windows game detection check failed: %s", e)
         _cached_game_state = False
         return False
 
@@ -1039,6 +1083,8 @@ def run_tray(auto_show: bool = False):
                 is_force = force_refresh
                 force_refresh = False
                 in_game = is_fullscreen_or_game_running()
+                if in_game:
+                    is_force = False
 
                 # Zero-config: on app start and on every hotplug/refresh, identify brand-new
                 # peripherals (once per model) and set them up without any user action.
