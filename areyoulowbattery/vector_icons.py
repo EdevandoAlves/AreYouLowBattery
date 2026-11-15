@@ -53,6 +53,10 @@ def render_category_pixmap(category: DeviceCategory, size: int = 20, color: str 
     return pix
 
 
+def render_category_icon(category: DeviceCategory, size: int = 18, color: str = "#38bdf8") -> QIcon:
+    return QIcon(render_category_pixmap(category, size=size, color=color))
+
+
 def render_search_icon(size: int = 16, color: str = "#cbd5e1") -> QIcon:
     pix = QPixmap(size, size)
     pix.fill(Qt.GlobalColor.transparent)

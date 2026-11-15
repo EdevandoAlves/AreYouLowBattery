@@ -1,7 +1,7 @@
 import os
 import json
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, mock_open
 
 from areyoulowbattery.models import DeviceProfile, DeviceMatch, DeviceCategory
 from areyoulowbattery.profile_loader import load_all_profiles
@@ -1040,16 +1040,25 @@ class TestAreYouLowBattery(unittest.TestCase):
         ]
         mock_bt = [("Pebble Keys 2 K380s", 95, "Windows Registry", None, "input-keyboard")]
         with patch("areyoulowbattery.discovery.enumerate_hidraw", return_value=nodes), \
-             patch("areyoulowbattery.discovery.is_device_ignored", return_value=True), \
+             patch("glob.glob", return_value=[]), \
+             patch("areyoulowbattery.engine.load_ignored_devices", return_value={"USB Receiver", "Pebble Keys 2 K380s"}), \
              patch("areyoulowbattery.engine.BatteryEngine._poll_bluetooth_peripheral_batteries", return_value=mock_bt):
-            # When include_ignored=False, ignored devices are omitted
+            # When include_ignored=False, user-ignored devices are omitted
             unmapped_clean = scan_unmapped_devices([], include_ignored=False)
             self.assertEqual(len(unmapped_clean), 0)
-            # When include_ignored=True, both ignored USB and Bluetooth devices are returned to allow restore!
+            # When include_ignored=True, both user-ignored USB and Bluetooth devices are returned to allow restore!
             unmapped_all = scan_unmapped_devices([], include_ignored=True)
             names = [d.name for d in unmapped_all]
             self.assertIn("USB Receiver", names)
             self.assertIn("Pebble Keys 2 K380s", names)
+
+        # Hardware blacklisted devices (root hubs, webcams, etc.) must NEVER be returned, even with include_ignored=True
+        with patch("areyoulowbattery.discovery.enumerate_hidraw", return_value=nodes), \
+             patch("glob.glob", return_value=[]), \
+             patch("areyoulowbattery.discovery.is_device_ignored", return_value=True), \
+             patch("areyoulowbattery.engine.BatteryEngine._poll_bluetooth_peripheral_batteries", return_value=mock_bt):
+            unmapped_hw = scan_unmapped_devices([], include_ignored=True)
+            self.assertEqual(len(unmapped_hw), 0)
 
     def test_is_profile_already_mapped_with_ignored_and_generic_profile(self):
         from areyoulowbattery.discovery import is_profile_already_mapped
@@ -1133,6 +1142,12 @@ class TestAreYouLowBattery(unittest.TestCase):
                 self.assertEqual(len(results), 1)
                 self.assertEqual(results[0][1].percentage, 85)
 
+                # CRITICAL: Even with force=True (tray click, hotplug, dashboard open),
+                # in_game=True MUST suppress hardware queries and never call handler!
+                results_forced = engine.poll_all_devices(force=True, in_game=True)
+                mock_get_handler.assert_not_called()
+                self.assertEqual(results_forced[0][1].percentage, 85)
+
     def test_linux_bluetooth_never_calls_bluetoothctl(self):
         from areyoulowbattery.engine import BatteryEngine
         engine = BatteryEngine()
@@ -1161,6 +1176,76 @@ class TestAreYouLowBattery(unittest.TestCase):
                         content = f.read()
                         self.assertIn("StartupWMClass=areyoulowbattery", content)
                         self.assertIn("Icon=areyoulowbattery", content)
+
+    def test_vector_icons_and_host_controller_category_inference(self):
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance() or QApplication(["test", "-platform", "offscreen"])
+        from areyoulowbattery.vector_icons import render_category_icon
+        from areyoulowbattery.models import DeviceCategory
+        from areyoulowbattery.discovery import _infer_category_and_icon
+
+        # Host Controller must NEVER be inferred as Gamepad
+        cat, ico = _infer_category_and_icon("xHCI Host Controller")
+        self.assertEqual(cat, DeviceCategory.OTHER)
+        self.assertEqual(ico, "🔋")
+
+        # Game controller must be GAMEPAD
+        cat, ico = _infer_category_and_icon("Xbox Wireless Controller")
+        self.assertEqual(cat, DeviceCategory.GAMEPAD)
+        self.assertEqual(ico, "🎮")
+
+        # Vector icon must render valid QIcon for all categories
+        for c in (DeviceCategory.MOUSE, DeviceCategory.KEYBOARD, DeviceCategory.HEADSET, DeviceCategory.GAMEPAD, DeviceCategory.OTHER):
+            icon = render_category_icon(c, size=18)
+            self.assertFalse(icon.isNull())
+
+    def test_udev_installer_linux_detection_and_windows_isolation(self):
+        from areyoulowbattery.udev_installer import (
+            are_udev_rules_installed,
+            install_udev_rules,
+            get_rules_source_path,
+        )
+
+        # 1. On Windows, installer returns immediately and rules are considered not applicable/true
+        with patch("sys.platform", "win32"):
+            self.assertTrue(are_udev_rules_installed())
+            self.assertFalse(install_udev_rules(None))
+
+        # 2. Source rules path must exist in repo
+        src_path = get_rules_source_path()
+        self.assertIsNotNone(src_path)
+        self.assertTrue(os.path.exists(src_path))
+
+        # 3. Test check with mocked file content
+        valid_rules = '1d57 25a7 046d'
+        with patch("sys.platform", "linux"):
+            with patch("os.path.exists", return_value=True):
+                with patch("builtins.open", mock_open(read_data=valid_rules)):
+                    self.assertTrue(are_udev_rules_installed())
+
+                # Outdated or corrupted rules return False
+                with patch("builtins.open", mock_open(read_data="old rules without hardening")):
+                    self.assertFalse(are_udev_rules_installed())
+
+        # 4. Successful installation via pkexec (passing args directly without sh -c)
+        mock_proc_ok = MagicMock()
+        mock_proc_ok.returncode = 0
+        with patch("sys.platform", "linux"):
+            with patch("shutil.which", return_value="/usr/bin/pkexec"):
+                with patch("subprocess.run", return_value=mock_proc_ok) as mock_sub:
+                    res = install_udev_rules(None)
+                    self.assertTrue(res)
+                    mock_sub.assert_called_once()
+                    cmd = mock_sub.call_args[0][0]
+                    self.assertEqual(cmd[0], "pkexec")
+
+        # 5. User cancels pkexec prompt (exit 126)
+        mock_proc_cancel = MagicMock()
+        mock_proc_cancel.returncode = 126
+        with patch("sys.platform", "linux"):
+            with patch("shutil.which", return_value="/usr/bin/pkexec"):
+                with patch("subprocess.run", return_value=mock_proc_cancel):
+                    self.assertFalse(install_udev_rules(None))
 
 
 if __name__ == "__main__":
