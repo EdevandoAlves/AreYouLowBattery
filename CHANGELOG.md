@@ -4,6 +4,39 @@ All notable changes to **AreYouLowBattery** from release to release are document
 
 ---
 
+## [v0.5.4] — 2026-11-15 — Smart Game Mode Hardening, Native Windows Game Detection, Automated udev Installer & Vector Dialogs
+
+### 🚀 Smart Game Mode Hardening (Anti-Stutter & Zero USB Contention)
+- **Strict Hardware Write Suppression in Competitive Matches**:
+  - `in_game=True` now strictly suppresses `force=True` hardware cache bypasses.
+  - If a user opens the dashboard, clicks the tray icon, or a hotplug event fires during a match (CS2, Valorant, Apex Legends, Deadlock, Dota 2), the 180s battery telemetry cache is strictly enforced, preventing any USB write commands (`write_output_report`) from being injected into mouse endpoints and guaranteeing zero packet collision with high-polling sensors (1000Hz/4000Hz/8000Hz).
+  - Background polling thread automatically drops `is_force` while in-game.
+
+### 🪟 Native Windows Game & Fullscreen Detection
+- **Win32 API Native Integration via `ctypes`**:
+  - Replaced the platform placeholder on Windows with real-time foreground process inspection and screen boundary verification using standard library `ctypes` (zero third-party dependencies).
+  - Automatically identifies competitive games (`cs2.exe`, `valorant.exe`, `r5apex.exe`, `overwatch.exe`, `pubg.exe`, `fortnite.exe`, `deadlock.exe`, etc.) and exclusive/borderless fullscreen windows.
+  - Windows players now benefit from the exact same latency-protective Game Mode as Linux users.
+
+### 🛡️ Automated udev Rules Installer & Composite Dongle Access (Linux)
+- **Graphical Administrator Authorization via `pkexec`**:
+  - Integrated one-click udev rules installation into the *Find Devices* assistant and settings menu.
+  - Elevates privileges cleanly via system Polkit (`pkexec`) using a dedicated atomic script (`rules/install_udev.sh`), eliminating manual terminal commands (`sudo cp`, `sudo udevadm`) and shell string interpolation risks.
+  - **100% Platform Isolated**: The udev installer and permissions banners are strictly guarded on Linux and completely omitted on Windows.
+- **Restored Multi-Interface Composite Dongle Compatibility**:
+  - Removed restrictive `bInterfaceProtocol!='01'` filter from `rules/99-areyoulowbattery.rules`. Composite 2.4G wireless dongles (such as Royalaxe `0x25a7:0x2420`) that declare protocol 01 on all endpoints now properly receive user-space `uaccess`.
+
+### 🎨 Native Vector Icons & Dialog Overhaul
+- **End of Broken Emojis in Dialogs**:
+  - Added `render_category_icon` to `vector_icons.py`.
+  - Replaced system `QInputDialog` (which caused blank square glyphs/tofu on Linux) with a modern dark-themed *Change Device Type / Icon* dialog featuring crisp sky-blue (`#38bdf8`) vector icons for Mouse, Keyboard, Headset, Gamepad, and Other.
+  - Updated *Find Devices* category dropdown to render native vector icons alongside text labels.
+- **Strict Hardware Blacklist in Device Discovery**:
+  - Enforced unconditional filtering of internal host hardware (Root Hubs, USB 2.0/3.0 Hubs, webcams, USB microphones, and motherboard RGB controllers like MSI Mystic Light) in the *Find Devices* scanner.
+  - Prevented USB Host Controllers from erroneously matching as Gamepads (`🎮`).
+
+---
+
 ## [v0.5.3.2] — 2026-11-14 — Anti-Stutter Gaming Mode, Native Bluetooth D-Bus & Wayland Integration
 
 ### 🚀 Performance & Gaming Optimization (Anti-Stutter)
