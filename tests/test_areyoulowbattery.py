@@ -1,7 +1,7 @@
 import os
 import json
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, mock_open
 
 from areyoulowbattery.models import DeviceProfile, DeviceMatch, DeviceCategory
 from areyoulowbattery.profile_loader import load_all_profiles
@@ -1142,6 +1142,12 @@ class TestAreYouLowBattery(unittest.TestCase):
                 self.assertEqual(len(results), 1)
                 self.assertEqual(results[0][1].percentage, 85)
 
+                # CRITICAL: Even with force=True (tray click, hotplug, dashboard open),
+                # in_game=True MUST suppress hardware queries and never call handler!
+                results_forced = engine.poll_all_devices(force=True, in_game=True)
+                mock_get_handler.assert_not_called()
+                self.assertEqual(results_forced[0][1].percentage, 85)
+
     def test_linux_bluetooth_never_calls_bluetoothctl(self):
         from areyoulowbattery.engine import BatteryEngine
         engine = BatteryEngine()
@@ -1192,6 +1198,54 @@ class TestAreYouLowBattery(unittest.TestCase):
         for c in (DeviceCategory.MOUSE, DeviceCategory.KEYBOARD, DeviceCategory.HEADSET, DeviceCategory.GAMEPAD, DeviceCategory.OTHER):
             icon = render_category_icon(c, size=18)
             self.assertFalse(icon.isNull())
+
+    def test_udev_installer_linux_detection_and_windows_isolation(self):
+        from areyoulowbattery.udev_installer import (
+            are_udev_rules_installed,
+            install_udev_rules,
+            get_rules_source_path,
+        )
+
+        # 1. On Windows, installer returns immediately and rules are considered not applicable/true
+        with patch("sys.platform", "win32"):
+            self.assertTrue(are_udev_rules_installed())
+            self.assertFalse(install_udev_rules(None))
+
+        # 2. Source rules path must exist in repo
+        src_path = get_rules_source_path()
+        self.assertIsNotNone(src_path)
+        self.assertTrue(os.path.exists(src_path))
+
+        # 3. Test check with mocked file content
+        valid_rules = '1d57 25a7 046d'
+        with patch("sys.platform", "linux"):
+            with patch("os.path.exists", return_value=True):
+                with patch("builtins.open", mock_open(read_data=valid_rules)):
+                    self.assertTrue(are_udev_rules_installed())
+
+                # Outdated or corrupted rules return False
+                with patch("builtins.open", mock_open(read_data="old rules without hardening")):
+                    self.assertFalse(are_udev_rules_installed())
+
+        # 4. Successful installation via pkexec (passing args directly without sh -c)
+        mock_proc_ok = MagicMock()
+        mock_proc_ok.returncode = 0
+        with patch("sys.platform", "linux"):
+            with patch("shutil.which", return_value="/usr/bin/pkexec"):
+                with patch("subprocess.run", return_value=mock_proc_ok) as mock_sub:
+                    res = install_udev_rules(None)
+                    self.assertTrue(res)
+                    mock_sub.assert_called_once()
+                    cmd = mock_sub.call_args[0][0]
+                    self.assertEqual(cmd[0], "pkexec")
+
+        # 5. User cancels pkexec prompt (exit 126)
+        mock_proc_cancel = MagicMock()
+        mock_proc_cancel.returncode = 126
+        with patch("sys.platform", "linux"):
+            with patch("shutil.which", return_value="/usr/bin/pkexec"):
+                with patch("subprocess.run", return_value=mock_proc_cancel):
+                    self.assertFalse(install_udev_rules(None))
 
 
 if __name__ == "__main__":

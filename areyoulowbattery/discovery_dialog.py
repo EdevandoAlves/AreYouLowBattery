@@ -404,6 +404,10 @@ class DeviceDiscoveryDialog(QDialog):
 
         layout.addLayout(header)
 
+        # Linux-only udev rules banner (100% omitted on Windows)
+        if sys.platform.startswith("linux"):
+            self._init_udev_banner(layout)
+
         # Scrollable area for device cards (Strictly vertical only)
         self.scroll = QScrollArea(self)
         self.scroll.setWidgetResizable(True)
@@ -429,6 +433,72 @@ class DeviceDiscoveryDialog(QDialog):
         layout.addLayout(footer)
 
         self._run_scan()
+
+    def _init_udev_banner(self, layout: QVBoxLayout):
+        from areyoulowbattery.udev_installer import are_udev_rules_installed, install_udev_rules
+
+        is_installed = are_udev_rules_installed()
+        banner = QFrame()
+        banner.setObjectName("udevBanner")
+        banner.setStyleSheet("""
+            QFrame#udevBanner {
+                background-color: #1e293b;
+                border: 1px solid #334155;
+                border-radius: 8px;
+                padding: 6px 12px;
+            }
+        """)
+        b_layout = QHBoxLayout(banner)
+        b_layout.setContentsMargins(8, 6, 8, 6)
+        b_layout.setSpacing(10)
+
+        icon_lbl = QLabel("🛡️")
+        icon_lbl.setStyleSheet("font-size: 15px;")
+        b_layout.addWidget(icon_lbl)
+
+        msg_layout = QVBoxLayout()
+        msg_layout.setSpacing(1)
+        msg_title = QLabel("2.4G Device Permissions (udev)" if not is_installed else "✓ 2.4G Device Permissions Active")
+        msg_title.setStyleSheet(
+            "font-size: 12px; font-weight: 600; color: #f8fafc;" if not is_installed else "font-size: 12px; font-weight: 600; color: #4ade80;"
+        )
+        msg_desc = QLabel(
+            "Install udev rules to access 2.4G mice & keyboards without root." if not is_installed
+            else "Hardened rules active. Click 'Update' if a newly connected device needs access."
+        )
+        msg_desc.setStyleSheet("font-size: 11px; color: #94a3b8;")
+        msg_layout.addWidget(msg_title)
+        msg_layout.addWidget(msg_desc)
+        b_layout.addLayout(msg_layout, 1)
+
+        btn_install = QPushButton("Install Rules" if not is_installed else "Update")
+        btn_install.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_install.setStyleSheet("""
+            QPushButton {
+                background-color: #0284c7;
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                padding: 5px 12px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #0369a1;
+            }
+        """)
+
+        def _handle_install():
+            if install_udev_rules(self):
+                msg_title.setText("✓ 2.4G Device Permissions Active")
+                msg_title.setStyleSheet("font-size: 12px; font-weight: 600; color: #4ade80;")
+                msg_desc.setText("Hardened rules active. Rescanning devices...")
+                btn_install.setText("Update")
+                self._run_scan()
+
+        btn_install.clicked.connect(_handle_install)
+        b_layout.addWidget(btn_install)
+        layout.addWidget(banner)
 
     def _run_scan(self):
         while self.cards_layout.count():
