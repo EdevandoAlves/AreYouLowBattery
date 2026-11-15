@@ -1136,11 +1136,11 @@ class TestAreYouLowBattery(unittest.TestCase):
     def test_linux_bluetooth_never_calls_bluetoothctl(self):
         from areyoulowbattery.engine import BatteryEngine
         engine = BatteryEngine()
-        with patch("sys.platform", "linux"):
-            with patch("subprocess.run") as mock_subproc:
-                with patch("dbus.SystemBus") as mock_bus:
-                    # SystemBus throws DBusException (e.g. system bus socket missing)
-                    mock_bus.side_effect = Exception("No DBus")
+        mock_dbus = MagicMock()
+        mock_dbus.SystemBus.side_effect = Exception("No DBus")
+        with patch.dict("sys.modules", {"dbus": mock_dbus}):
+            with patch("sys.platform", "linux"):
+                with patch("subprocess.run") as mock_subproc:
                     res = engine._poll_bluetooth_peripheral_batteries()
                     # Must never spawn bluetoothctl subprocess
                     mock_subproc.assert_not_called()
@@ -1150,12 +1150,12 @@ class TestAreYouLowBattery(unittest.TestCase):
         import tempfile
         from areyoulowbattery.tray import _ensure_linux_desktop_entry
 
-        # Test desktop file creation in a mocked home dir
+        # Test desktop file creation in a mocked home dir across all OSes
         with tempfile.TemporaryDirectory() as tmp_home:
-            with patch.dict(os.environ, {"HOME": tmp_home}):
+            with patch("os.path.expanduser", side_effect=lambda p: p.replace("~", tmp_home)):
                 with patch("sys.platform", "linux"):
                     _ensure_linux_desktop_entry()
-                    desktop_path = os.path.join(tmp_home, ".local/share/applications/areyoulowbattery.desktop")
+                    desktop_path = os.path.join(tmp_home, ".local", "share", "applications", "areyoulowbattery.desktop")
                     self.assertTrue(os.path.exists(desktop_path))
                     with open(desktop_path, "r", encoding="utf-8") as f:
                         content = f.read()
