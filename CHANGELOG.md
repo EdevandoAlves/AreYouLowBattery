@@ -4,6 +4,33 @@ All notable changes to **AreYouLowBattery** from release to release are document
 
 ---
 
+## [v0.5.3.2] — 2026-11-14 — Anti-Stutter Gaming Mode, Native Bluetooth D-Bus & Wayland Integration
+
+### 🚀 Performance & Gaming Optimization (Anti-Stutter)
+- **Competitive Game Mode (CS2, Deadlock, Dota 2, Apex Legends)**:
+  - Automatically identifies active competitive fullscreen games and enters low-latency Game Mode.
+  - **Zero USB Contention on Mice**: Suspends USB write commands (`write_output_report`) on 2.4G wireless mouse dongles (CompX, Nordic, Areson) and extends telemetry cache to 180s, preventing any packet collision with 1000Hz/4000Hz/8000Hz mouse sensor reporting.
+  - **Relaxed Background Threading**: Extends routine background polling cadence from 10s to 120s while games are active.
+  - **Auto-Detection & Hotplug Pausing**: Suppresses device probing and debounces udev events during gaming sessions.
+  - **Cached Game Check**: Caches `/proc` process detection for 15s to avoid repetitive kernel context switches.
+
+### 🐛 Bug Fixes & Stability
+- **Elimination of `bluetoothctl` Coredumps on Linux (`SIGABRT` / Exit Code 134)**:
+  - Completely removed external `bluetoothctl` CLI subprocess execution.
+  - Bluetooth battery querying on Linux now operates exclusively in-memory via D-Bus (`org.bluez` / `org.freedesktop.UPower`) and `/sys/class/power_supply`.
+  - Eliminates all recurring `systemd-coredump` I/O spikes and crashes on modern BlueZ 5.86 / Fedora / Nobara systems.
+- **Wayland Window Identity & Desktop Integration (Resolved Wayland "W" Icon)**:
+  - Implemented `get_app_icon()` with automatic fallback to high-DPI vector graphics.
+  - Sets `app.setDesktopFileName("areyoulowbattery")` and `setWindowIcon(...)` across the tray, dashboard flyout, and discovery dialogs.
+  - Automatically provisions `~/.local/share/applications/areyoulowbattery.desktop` and installs high-res icons in `~/.local/share/icons/hicolor/256x256/apps/` on startup so KDE Plasma and GNOME Wayland compositors display the official application icon instead of the generic Wayland "W" logo.
+
+### 🛡️ Security Hardening
+- **Anti-Keylogger udev Rule Hardening (`ATTRS{bInterfaceProtocol}!="01"`)**:
+  - Excluded standard Boot Keyboard text-typing interfaces from receiving user ACL permissions.
+  - Keystroke endpoints remain strictly locked to `root:root` (`0600`), ensuring malicious user-space processes cannot intercept typed passwords via `/dev/hidraw`, while vendor battery telemetry endpoints remain accessible to the app.
+
+---
+
 ## [v0.5.3.1] — 2026-11-13 — Bluetooth GATT Authority, Logitech Nano Receiver & Linux Subprocess Isolation
 
 ### 🐛 Bug Fixes & Hardware Stability

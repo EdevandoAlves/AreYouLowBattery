@@ -13,6 +13,7 @@ from areyoulowbattery.vector_icons import (
     render_refresh_icon,
     render_gear_icon,
     render_close_icon,
+    get_app_icon,
 )
 
 
@@ -313,6 +314,9 @@ class BatteryPopup(QWidget):
             | Qt.WindowType.NoDropShadowWindowHint,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setWindowTitle("AreYouLowBattery")
+        self.setObjectName("areyoulowbattery")
+        self.setWindowIcon(get_app_icon())
         self._on_refresh = on_refresh
         self._settings_menu = settings_menu or context_menu
         self._context_menu = context_menu

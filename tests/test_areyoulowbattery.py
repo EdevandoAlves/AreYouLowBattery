@@ -1105,6 +1105,63 @@ class TestAreYouLowBattery(unittest.TestCase):
             status = handler.read_battery(ble_dev, prof)
             self.assertIsNone(status)
 
+    def test_game_mode_polling_suppresses_hardware_queries(self):
+        import time
+        from areyoulowbattery.engine import BatteryEngine
+        from areyoulowbattery.models import BatteryStatus
+        engine = BatteryEngine()
+        prof = DeviceProfile(
+            name="Test Gaming Mouse",
+            category=DeviceCategory.MOUSE,
+            icon="🖱️",
+            match=DeviceMatch(vendor_id=0x25A7, product_id=0xFA08),
+            protocol="compx_v1",
+        )
+        engine.profiles = [prof]
+        dev = HidrawDevice("/dev/hidraw0", 0x25A7, 0xFA08, 1, "Gaming Mouse")
+
+        # Mock recent query performed 30 seconds ago
+        cached_status = BatteryStatus(85, False, True, "Cached 85%")
+        engine._recent_queries["Test Gaming Mouse"] = (prof, cached_status, time.time() - 30.0)
+
+        with patch("areyoulowbattery.engine.enumerate_hidraw", return_value=[dev]):
+            with patch("areyoulowbattery.engine.get_handler") as mock_get_handler:
+                # In game mode (in_game=True), recent query within 180s must be reused directly
+                # without calling the handler at all!
+                results = engine.poll_all_devices(force=False, in_game=True)
+                mock_get_handler.assert_not_called()
+                self.assertEqual(len(results), 1)
+                self.assertEqual(results[0][1].percentage, 85)
+
+    def test_linux_bluetooth_never_calls_bluetoothctl(self):
+        from areyoulowbattery.engine import BatteryEngine
+        engine = BatteryEngine()
+        with patch("sys.platform", "linux"):
+            with patch("subprocess.run") as mock_subproc:
+                with patch("dbus.SystemBus") as mock_bus:
+                    # SystemBus throws DBusException (e.g. system bus socket missing)
+                    mock_bus.side_effect = Exception("No DBus")
+                    res = engine._poll_bluetooth_peripheral_batteries()
+                    # Must never spawn bluetoothctl subprocess
+                    mock_subproc.assert_not_called()
+                    self.assertEqual(res, [])
+
+    def test_get_app_icon_and_desktop_file_generation(self):
+        import tempfile
+        from areyoulowbattery.tray import _ensure_linux_desktop_entry
+
+        # Test desktop file creation in a mocked home dir
+        with tempfile.TemporaryDirectory() as tmp_home:
+            with patch.dict(os.environ, {"HOME": tmp_home}):
+                with patch("sys.platform", "linux"):
+                    _ensure_linux_desktop_entry()
+                    desktop_path = os.path.join(tmp_home, ".local/share/applications/areyoulowbattery.desktop")
+                    self.assertTrue(os.path.exists(desktop_path))
+                    with open(desktop_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                        self.assertIn("StartupWMClass=areyoulowbattery", content)
+                        self.assertIn("Icon=areyoulowbattery", content)
+
 
 if __name__ == "__main__":
     unittest.main()

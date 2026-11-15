@@ -15,10 +15,13 @@ def _get_config_dir() -> str:
     config_base = (
         os.environ.get("LOCALAPPDATA")
         if sys.platform == "win32"
-        else os.path.expanduser("~/.config")
+        else os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
     ) or os.path.expanduser("~/.config")
     d = os.path.join(config_base, "areyoulowbattery")
-    os.makedirs(d, exist_ok=True)
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
     return d
 
 
@@ -586,6 +589,14 @@ class BatteryEngine:
                         modalias = str(dev.get("Modalias")) if dev.get("Modalias") else None
                         icon_hint = str(dev.get("Icon")) if dev.get("Icon") else None
                         batt = ifaces.get("org.bluez.Battery1", {}).get("Percentage")
+                        if batt is None:
+                            # Check if any child object under this device path has Battery1
+                            for sub_path, sub_ifaces in objects.items():
+                                if sub_path.startswith(path) and "org.bluez.Battery1" in sub_ifaces:
+                                    sub_batt = sub_ifaces["org.bluez.Battery1"].get("Percentage")
+                                    if sub_batt is not None:
+                                        batt = sub_batt
+                                        break
                         if batt is not None:
                             results.append((name, int(batt), "BlueZ D-Bus", modalias, icon_hint))
             if results:
@@ -611,40 +622,6 @@ class BatteryEngine:
                     results.append((model, int(pct), "UPower D-Bus", None, icon_hint))
             if results:
                 return results
-        except Exception:
-            pass
-
-        # 3. Fallback: bluetoothctl CLI
-        try:
-            import subprocess
-            from areyoulowbattery.clean_env import get_clean_env
-            clean_env = get_clean_env()
-            out = subprocess.run(
-                ["bluetoothctl", "devices", "Connected"],
-                capture_output=True, text=True, timeout=1.0, env=clean_env
-            )
-            for line in out.stdout.splitlines():
-                parts = line.strip().split(maxsplit=2)
-                if len(parts) >= 3 and parts[0] == "Device":
-                    mac, dev_name = parts[1], parts[2]
-                    info_out = subprocess.run(
-                        ["bluetoothctl", "info", mac],
-                        capture_output=True, text=True, timeout=1.0, env=clean_env
-                    )
-                    modalias = None
-                    icon_hint = None
-                    pct_int = None
-                    for info_line in info_out.stdout.splitlines():
-                        if "Modalias:" in info_line:
-                            modalias = info_line.split(":")[-1].strip()
-                        if "Icon:" in info_line:
-                            icon_hint = info_line.split(":")[-1].strip()
-                        if "Battery Percentage:" in info_line:
-                            pct_val = info_line.split(":")[-1].strip()
-                            if "(" in pct_val:
-                                pct_int = int(pct_val.split("(")[-1].replace(")", "").strip())
-                    if pct_int is not None:
-                        results.append((dev_name, pct_int, "bluetoothctl", modalias, icon_hint))
         except Exception:
             pass
 
@@ -708,7 +685,7 @@ class BatteryEngine:
             seen_names.add(name)
         return results
 
-    def poll_all_devices(self, force: bool = False) -> List[Tuple[DeviceProfile, BatteryStatus]]:
+    def poll_all_devices(self, force: bool = False, in_game: bool = False) -> List[Tuple[DeviceProfile, BatteryStatus]]:
         ignored = load_ignored_devices()
         connected_hid = enumerate_hidraw()
         results = []
@@ -737,11 +714,14 @@ class BatteryEngine:
                     best_profile = dev_list[0][0]
                     best_status = last_stat
 
-            # Per-device rate limit: never hit the same device's hardware more than once
-            # every MIN_QUERY_INTERVAL seconds (hotplug storms, rapid UI events), unless forced.
+            # Per-device rate limit / Game Mode:
+            # During competitive fullscreen games (in_game=True), extend the query interval
+            # to 180s (3 minutes) to completely eliminate USB frame contention and latency spikes.
+            # In regular desktop mode, rate limit to MIN_QUERY_INTERVAL (5s).
+            query_interval = 180.0 if in_game else self.MIN_QUERY_INTERVAL
             if not force and best_status is None and name in self._recent_queries:
                 r_prof, r_stat, r_ts = self._recent_queries[name]
-                if time.time() - r_ts < self.MIN_QUERY_INTERVAL:
+                if time.time() - r_ts < query_interval:
                     best_profile, best_status = r_prof, r_stat
 
             if best_status is None:
