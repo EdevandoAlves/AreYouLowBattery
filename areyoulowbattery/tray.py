@@ -184,16 +184,75 @@ def _format_device_line(prof: DeviceProfile, stat: BatteryStatus) -> str:
     return f"{icon}  {prof.name}: {stat.percentage}%"
 
 
+def _ensure_linux_desktop_entry():
+    """
+    On Linux / Wayland, compositors (KWin, Mutter) display a generic 'W' fallback icon
+    unless an app_id desktop entry matching app.desktopFileName exists in ~/.local/share/applications/.
+    This installs the icon and .desktop entry automatically on app startup.
+    """
+    if sys.platform == "win32":
+        return
+    try:
+        from areyoulowbattery.profile_loader import get_resource_dir
+        import shutil
+
+        # 1. Install icon into ~/.local/share/icons/hicolor/256x256/apps/areyoulowbattery.png
+        icon_dir = os.path.expanduser("~/.local/share/icons/hicolor/256x256/apps")
+        os.makedirs(icon_dir, exist_ok=True)
+        dest_icon = os.path.join(icon_dir, "areyoulowbattery.png")
+
+        src_icon = os.path.join(get_resource_dir(), "assets", "icon.png")
+        if os.path.exists(src_icon) and not os.path.exists(dest_icon):
+            try:
+                shutil.copy2(src_icon, dest_icon)
+            except Exception:
+                pass
+
+        # 2. Install desktop entry into ~/.local/share/applications/areyoulowbattery.desktop
+        apps_dir = os.path.expanduser("~/.local/share/applications")
+        os.makedirs(apps_dir, exist_ok=True)
+        desktop_file = os.path.join(apps_dir, "areyoulowbattery.desktop")
+
+        exe_path = os.path.realpath(sys.executable if getattr(sys, "frozen", False) else sys.argv[0])
+        if not getattr(sys, "frozen", False):
+            exec_cmd = f'"{sys.executable}" "{exe_path}" --tray'
+        else:
+            exec_cmd = f'"{exe_path}" --tray'
+
+        desktop_content = (
+            "[Desktop Entry]\n"
+            "Name=AreYouLowBattery\n"
+            "Comment=Wireless Peripheral Battery Monitor & System Tray\n"
+            f"Exec={exec_cmd}\n"
+            "Icon=areyoulowbattery\n"
+            "Terminal=false\n"
+            "Type=Application\n"
+            "Categories=Utility;HardwareSettings;\n"
+            "StartupWMClass=areyoulowbattery\n"
+        )
+
+        if not os.path.exists(desktop_file):
+            with open(desktop_file, "w", encoding="utf-8") as f:
+                f.write(desktop_content)
+    except Exception:
+        pass
+
+
 def run_tray(auto_show: bool = False):
     from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QInputDialog, QMessageBox
     from PySide6.QtGui import QCursor, QAction
     from PySide6.QtCore import Signal, QObject, QTimer
     from areyoulowbattery.engine import save_custom_name, save_custom_category, save_device_protocol, remove_device
     from areyoulowbattery.models import CATEGORY_ICONS, DeviceCategory
+    from areyoulowbattery.vector_icons import get_app_icon
+
+    _ensure_linux_desktop_entry()
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("AreYouLowBattery")
+    app.setDesktopFileName("areyoulowbattery")
+    app.setWindowIcon(get_app_icon())
 
     tray = QSystemTrayIcon()
     tray.setIcon(_render_tray_icon(None, False, False))
@@ -655,16 +714,25 @@ def run_tray(auto_show: bool = False):
     dynamic_actions = []
     # Tracks notification levels per device: key = profile.name, value = set of triggered thresholds (e.g. {15, 5})
     notified_thresholds: dict[str, set[int]] = {}
+    _last_game_check_ts = 0.0
+    _cached_game_state = False
 
-    def is_fullscreen_or_game_running() -> bool:
+    def is_fullscreen_or_game_running(ttl: float = 15.0) -> bool:
         """
         Detects if a competitive game (CS2, Dota 2, Apex, etc.) is running.
         Prevents popping notifications that could cause stutter or distraction during matches.
+        Results are cached for `ttl` seconds to avoid traversing /proc continuously.
         """
+        nonlocal _last_game_check_ts, _cached_game_state
+        now = time.time()
+        if now - _last_game_check_ts < ttl:
+            return _cached_game_state
+
+        _last_game_check_ts = now
         game_signatures = {
             "cs2", "csgo_linux64", "dota2", "steam_app_",
             "valorant.exe", "overwatch.exe", "r5apex.exe",
-            "pubg.exe", "fortnite.exe"
+            "pubg.exe", "fortnite.exe", "deadlock"
         }
         my_pid = os.getpid()
         if sys.platform != "win32":
@@ -674,7 +742,8 @@ def run_tray(auto_show: bool = False):
                         continue
                     try:
                         exe_name = os.path.basename(os.readlink(f"/proc/{pid_str}/exe")).lower()
-                        if exe_name in game_signatures or any(sig in exe_name for sig in ("cs2", "dota2", "steam_app")):
+                        if exe_name in game_signatures or any(sig in exe_name for sig in ("cs2", "dota2", "steam_app", "deadlock")):
+                            _cached_game_state = True
                             return True
                     except Exception:
                         pass
@@ -684,6 +753,7 @@ def run_tray(auto_show: bool = False):
             # On Windows, Focus Assist / Game Bar normally silences notifications automatically,
             # but we can check foreground window state if needed.
             pass
+        _cached_game_state = False
         return False
 
     def _play_alert_sound(critical: bool = False):
@@ -833,8 +903,12 @@ def run_tray(auto_show: bool = False):
                     if stop_event.is_set():
                         break
                     if any(act in line for act in (" add ", " remove ", " change ")):
-                        # Brief debounce so udev permissions settle on new nodes
-                        time.sleep(0.25)
+                        if is_fullscreen_or_game_running():
+                            # Debounce longer in-game so USB bus renegotiations don't trigger wakeups
+                            time.sleep(2.0)
+                        else:
+                            # Brief debounce so udev permissions settle on new nodes
+                            time.sleep(0.25)
                         trigger_force_refresh()
                 proc.terminate()
                 return
@@ -844,11 +918,11 @@ def run_tray(auto_show: bool = False):
         # Fallback (Windows or Linux without udevadm): compare lightweight topology signature
         last_sig = get_hid_topology_signature()
         while not stop_event.is_set():
-            time.sleep(1.5)
+            time.sleep(5.0 if is_fullscreen_or_game_running() else 1.5)
             cur_sig = get_hid_topology_signature()
             if cur_sig != last_sig:
                 last_sig = cur_sig
-                time.sleep(0.2)
+                time.sleep(1.0 if is_fullscreen_or_game_running() else 0.2)
                 trigger_force_refresh()
 
     def worker():
@@ -858,13 +932,16 @@ def run_tray(auto_show: bool = False):
         detector = AutoDetector()
         first_run = True
         while not stop_event.is_set():
+            in_game = False
             try:
                 is_force = force_refresh
                 force_refresh = False
+                in_game = is_fullscreen_or_game_running()
 
                 # Zero-config: on app start and on every hotplug/refresh, identify brand-new
                 # peripherals (once per model) and set them up without any user action.
-                if is_force or first_run:
+                # Skip automatic probing during competitive games to avoid background CPU/USB load!
+                if (is_force or first_run) and not in_game:
                     first_run = False
                     try:
                         events = detector.run(engine.profiles)
@@ -875,12 +952,14 @@ def run_tray(auto_show: bool = False):
                     except Exception as e:
                         print(f"Auto-detect error: {e}", file=sys.stderr, flush=True)
 
-                results = engine.poll_all_devices(force=is_force)
+                results = engine.poll_all_devices(force=is_force, in_game=in_game)
                 write_cache(results)
                 updater.updated.emit(results)
             except Exception as e:
                 print(f"Tray worker error: {e}", file=sys.stderr, flush=True)
-            wake_event.wait(timeout=10.0)
+            # In Game Mode, relax polling to 120s to ensure zero interference with competitive gameplay.
+            # In regular desktop mode, default to 10s.
+            wake_event.wait(timeout=120.0 if in_game else 10.0)
             wake_event.clear()
 
     def on_updated(results: List[Tuple[DeviceProfile, BatteryStatus]]):

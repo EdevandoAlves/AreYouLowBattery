@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QCursor
 
 from areyoulowbattery.models import DeviceCategory, CATEGORY_ICONS, DeviceProfile
-from areyoulowbattery.vector_icons import render_category_pixmap
+from areyoulowbattery.vector_icons import render_category_pixmap, get_app_icon
 from areyoulowbattery.discovery import (
     DiscoveredDevice, scan_unmapped_devices, probe_device_protocol, save_custom_profile
 )
@@ -331,6 +331,8 @@ class DeviceDiscoveryDialog(QDialog):
         self.on_profile_created = on_profile_created
 
         self.setWindowTitle("Find & Configure Devices — AreYouLowBattery")
+        self.setObjectName("areyoulowbattery")
+        self.setWindowIcon(get_app_icon())
         self.setFixedSize(620, 540)
         self.setStyleSheet("""
             QDialog {

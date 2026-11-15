@@ -123,3 +123,48 @@ def render_close_icon(size: int = 16, color: str = "#cbd5e1") -> QIcon:
     p.drawLine(12, 4, 4, 12)
     p.end()
     return QIcon(pix)
+
+
+def get_app_icon() -> QIcon:
+    """Returns the official application icon, falling back to a crisp vector battery icon."""
+    import os
+    try:
+        from areyoulowbattery.profile_loader import get_resource_dir
+        icon_path = os.path.join(get_resource_dir(), "assets", "icon.png")
+        if os.path.exists(icon_path):
+            ico = QIcon(icon_path)
+            if not ico.isNull():
+                return ico
+    except Exception:
+        pass
+
+    # High-DPI Vector Fallback
+    size = 128
+    pix = QPixmap(size, size)
+    pix.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setBrush(QBrush(QColor("#0f172a")))
+    p.setPen(QPen(QColor("#38bdf8"), 4))
+    p.drawRoundedRect(QRectF(4, 4, size - 8, size - 8), 24, 24)
+
+    pen = QPen(QColor("#38bdf8"), 6)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    p.drawRoundedRect(QRectF(28, 44, 64, 40), 8, 8)
+    p.fillRect(QRectF(94, 56, 8, 16), QColor("#38bdf8"))
+
+    path = QPainterPath()
+    path.moveTo(62, 34)
+    path.lineTo(48, 64)
+    path.lineTo(60, 64)
+    path.lineTo(54, 94)
+    path.lineTo(76, 58)
+    path.lineTo(64, 58)
+    path.closeSubpath()
+    p.setBrush(QBrush(QColor("#38bdf8")))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawPath(path)
+    p.end()
+    return QIcon(pix)
+
