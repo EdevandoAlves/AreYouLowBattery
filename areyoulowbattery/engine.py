@@ -227,7 +227,9 @@ def _infer_category_and_icon(name: str) -> Tuple[DeviceCategory, str]:
         return DeviceCategory.MOUSE, "🖱️"
     if any(k in lower for k in ("keyboard", "keychron", "royalaxe")):
         return DeviceCategory.KEYBOARD, "⌨️"
-    if any(k in lower for k in ("gamepad", "controller", "joystick", "xbox", "dualsense")):
+    if any(k in lower for k in ("gamepad", "joystick", "xbox", "dualsense", "switch", "8bitdo")) or (
+        "controller" in lower and not any(h in lower for h in ("host", "root", "storage", "network", "ethernet", "hub"))
+    ):
         return DeviceCategory.GAMEPAD, "🎮"
     return DeviceCategory.OTHER, "🔋"
 

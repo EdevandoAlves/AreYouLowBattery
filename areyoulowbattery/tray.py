@@ -239,12 +239,15 @@ def _ensure_linux_desktop_entry():
 
 
 def run_tray(auto_show: bool = False):
-    from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QInputDialog, QMessageBox
+    from PySide6.QtWidgets import (
+        QApplication, QSystemTrayIcon, QMenu, QInputDialog, QMessageBox,
+        QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox
+    )
     from PySide6.QtGui import QCursor, QAction
-    from PySide6.QtCore import Signal, QObject, QTimer
+    from PySide6.QtCore import Signal, QObject, QTimer, QSize
     from areyoulowbattery.engine import save_custom_name, save_custom_category, save_device_protocol, remove_device
     from areyoulowbattery.models import CATEGORY_ICONS, DeviceCategory
-    from areyoulowbattery.vector_icons import get_app_icon
+    from areyoulowbattery.vector_icons import get_app_icon, render_category_icon
 
     _ensure_linux_desktop_entry()
 
@@ -448,44 +451,143 @@ def run_tray(auto_show: bool = False):
         elif len(current_supported_devices) == 1:
             prof = current_supported_devices[0][0]
         else:
-            dev_names = [f"{p.icon} {p.name}" for p, _ in current_supported_devices]
-            choice, ok = QInputDialog.getItem(
-                None, "Change Device Type", "Select device:", dev_names, 0, False
-            )
-            if not ok or not choice:
+            dev_dialog = QDialog()
+            dev_dialog.setWindowTitle("Select Device")
+            dev_dialog.setWindowIcon(get_app_icon())
+            dev_dialog.setFixedWidth(350)
+            dev_dialog.setStyleSheet("""
+                QDialog { background-color: #0f172a; color: #f8fafc; }
+                QLabel { color: #f8fafc; font-size: 12px; }
+                QComboBox { background-color: #1e293b; border: 1px solid #475569; border-radius: 6px; color: #f8fafc; padding: 6px; font-size: 12px; }
+                QComboBox QAbstractItemView { background-color: #1e293b; color: #f8fafc; selection-background-color: #334155; }
+                QPushButton#okBtn { background-color: #0284c7; color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-weight: 600; font-size: 12px; }
+                QPushButton#cancelBtn { background-color: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 6px; padding: 6px 14px; font-size: 12px; }
+            """)
+            d_lay = QVBoxLayout(dev_dialog)
+            d_lay.setContentsMargins(16, 16, 16, 16)
+            d_lay.setSpacing(12)
+            d_lay.addWidget(QLabel("Select device to change type:"))
+            dev_cmb = QComboBox()
+            dev_cmb.setIconSize(QSize(18, 18))
+            for p, _ in current_supported_devices:
+                dev_cmb.addItem(render_category_icon(p.category, size=18, color="#38bdf8"), p.name, p)
+            d_lay.addWidget(dev_cmb)
+            d_btns = QHBoxLayout()
+            d_btns.addStretch(1)
+            b_c = QPushButton("Cancel")
+            b_c.setObjectName("cancelBtn")
+            b_c.clicked.connect(dev_dialog.reject)
+            d_btns.addWidget(b_c)
+            b_ok = QPushButton("Next")
+            b_ok.setObjectName("okBtn")
+            b_ok.clicked.connect(dev_dialog.accept)
+            d_btns.addWidget(b_ok)
+            d_lay.addLayout(d_btns)
+            if dev_dialog.exec() != QDialog.DialogCode.Accepted:
                 return
-            idx = dev_names.index(choice)
-            prof = current_supported_devices[idx][0]
+            prof = dev_cmb.currentData()
 
-        type_options = [
-            ("🖱️ Mouse", "mouse", "🖱️"),
-            ("⌨️ Keyboard", "keyboard", "⌨️"),
-            ("🎧 Headset", "headset", "🎧"),
-            ("🎮 Gamepad", "gamepad", "🎮"),
-            ("🔋 Other", "other", "🔋"),
+        type_dialog = QDialog()
+        type_dialog.setWindowTitle("Change Device Type / Icon")
+        type_dialog.setWindowIcon(get_app_icon())
+        type_dialog.setFixedWidth(360)
+        type_dialog.setStyleSheet("""
+            QDialog {
+                background-color: #0f172a;
+                color: #f8fafc;
+            }
+            QLabel {
+                color: #f8fafc;
+                font-size: 12px;
+            }
+            QComboBox {
+                background-color: #1e293b;
+                border: 1px solid #475569;
+                border-radius: 6px;
+                color: #f8fafc;
+                padding: 6px 8px;
+                font-size: 12px;
+            }
+            QComboBox:focus {
+                border: 1px solid #38bdf8;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1e293b;
+                color: #f8fafc;
+                selection-background-color: #334155;
+                border: 1px solid #475569;
+            }
+            QPushButton#saveBtn {
+                background-color: #0284c7;
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 16px;
+                font-weight: 600;
+                font-size: 12px;
+            }
+            QPushButton#saveBtn:hover {
+                background-color: #0369a1;
+            }
+            QPushButton#cancelBtn {
+                background-color: #1e293b;
+                color: #94a3b8;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                padding: 6px 16px;
+                font-weight: 600;
+                font-size: 12px;
+            }
+            QPushButton#cancelBtn:hover {
+                background-color: #334155;
+                color: #f8fafc;
+            }
+        """)
+
+        t_lay = QVBoxLayout(type_dialog)
+        t_lay.setContentsMargins(18, 18, 18, 18)
+        t_lay.setSpacing(14)
+
+        desc = QLabel(f"Select category for <b>{prof.name}</b>:")
+        desc.setWordWrap(True)
+        t_lay.addWidget(desc)
+
+        cmb_cat = QComboBox()
+        cmb_cat.setIconSize(QSize(18, 18))
+        cats = [
+            ("Mouse", DeviceCategory.MOUSE, "🖱️"),
+            ("Keyboard", DeviceCategory.KEYBOARD, "⌨️"),
+            ("Headset", DeviceCategory.HEADSET, "🎧"),
+            ("Gamepad", DeviceCategory.GAMEPAD, "🎮"),
+            ("Other", DeviceCategory.OTHER, "🔋"),
         ]
-        labels = [item[0] for item in type_options]
-        current_idx = 0
-        for i, item in enumerate(type_options):
-            if item[1] == prof.category.value:
-                current_idx = i
-                break
+        curr_idx = 0
+        for i, (name, cat_enum, emoji) in enumerate(cats):
+            ico = render_category_icon(cat_enum, size=18, color="#38bdf8")
+            cmb_cat.addItem(ico, name, (cat_enum.value, emoji))
+            if cat_enum == prof.category:
+                curr_idx = i
+        cmb_cat.setCurrentIndex(curr_idx)
+        t_lay.addWidget(cmb_cat)
 
-        choice, ok = QInputDialog.getItem(
-            None,
-            "Change Device Type",
-            f"Select new type for '{prof.name}':",
-            labels,
-            current_idx,
-            False,
-        )
-        if ok and choice:
-            for lbl, cat, ico in type_options:
-                if lbl == choice:
-                    save_custom_category(prof.name, cat, ico)
-                    engine.profiles = load_all_profiles()
-                    wake_event.set()
-                    break
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setObjectName("cancelBtn")
+        btn_cancel.clicked.connect(type_dialog.reject)
+        btn_row.addWidget(btn_cancel)
+
+        btn_save = QPushButton("Save")
+        btn_save.setObjectName("saveBtn")
+        btn_save.clicked.connect(type_dialog.accept)
+        btn_row.addWidget(btn_save)
+        t_lay.addLayout(btn_row)
+
+        if type_dialog.exec() == QDialog.DialogCode.Accepted:
+            cat_val, ico = cmb_cat.currentData()
+            save_custom_category(prof.name, cat_val, ico)
+            engine.profiles = load_all_profiles()
+            wake_event.set()
 
     def prompt_change_protocol(target_prof: Optional[DeviceProfile] = None):
         if not current_supported_devices and not target_prof:

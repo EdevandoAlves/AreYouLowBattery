@@ -46,7 +46,9 @@ class DiscoveredDevice:
 
 def _infer_category_and_icon(name: str) -> Tuple[DeviceCategory, str]:
     lower = name.lower()
-    if any(k in lower for k in ("controller", "gamepad", "joystick", "8bitdo", "xbox", "dualsense", "switch")):
+    if any(k in lower for k in ("gamepad", "joystick", "8bitdo", "xbox", "dualsense", "switch")) or (
+        "controller" in lower and not any(h in lower for h in ("host", "root", "storage", "network", "ethernet", "hub"))
+    ):
         return DeviceCategory.GAMEPAD, "🎮"
     if any(k in lower for k in ("headset", "headphone", "earbud", "audio", "gh02")):
         return DeviceCategory.HEADSET, "🎧"
@@ -138,13 +140,24 @@ def scan_unmapped_devices(
     hidden/removed are also returned so the user can easily un-hide and restore them.
     """
     from areyoulowbattery.engine import load_ignored_devices
-    ignored = load_ignored_devices() if include_ignored else None
+    user_ignored = load_ignored_devices()
+    ignored = user_ignored if include_ignored else None
     candidates: Dict[Tuple[int, int], DiscoveredDevice] = {}
+
+    def _is_user_hidden(n: str, v: int, p: int) -> bool:
+        if not user_ignored:
+            return False
+        vid_key = f"{v:04x}:{p:04x}"
+        return n in user_ignored or vid_key in user_ignored or f"{v:04x}" in user_ignored
 
     # 1. Scan /dev/hidraw nodes
     hid_nodes = enumerate_hidraw()
     for dev in hid_nodes:
-        if not include_ignored and is_device_ignored(dev.name, dev.vendor_id, dev.product_id):
+        # Internal hardware (motherboard, hubs, microphones, webcams) is ALWAYS ignored
+        if is_device_ignored(dev.name, dev.vendor_id, dev.product_id):
+            continue
+        # Peripherals previously hidden by user are only skipped if include_ignored is False
+        if not include_ignored and _is_user_hidden(dev.name, dev.vendor_id, dev.product_id):
             continue
         if is_profile_already_mapped(dev.vendor_id, dev.product_id, profiles, ignored=ignored, dev_name=dev.name):
             continue
@@ -165,6 +178,17 @@ def scan_unmapped_devices(
     # 2. Scan Linux USB bus sysfs (captures xpad controllers and non-HID dongles like 8BitDo)
     if sys.platform != "win32":
         for u_dir in sorted(glob.glob("/sys/bus/usb/devices/*")):
+            # Fast filter: skip USB Hubs (09), Wireless Bluetooth Host Adapters (e0), Diagnostic (dc)
+            cls_file = os.path.join(u_dir, "bDeviceClass")
+            if os.path.exists(cls_file):
+                try:
+                    with open(cls_file, "r") as cf:
+                        cls = cf.read().strip()
+                    if cls in ("09", "e0", "dc"):
+                        continue
+                except Exception:
+                    pass
+
             v_file = os.path.join(u_dir, "idVendor")
             p_file = os.path.join(u_dir, "idProduct")
             if not (os.path.exists(v_file) and os.path.exists(p_file)):
@@ -199,7 +223,10 @@ def scan_unmapped_devices(
                     except Exception:
                         pass
 
-            if not include_ignored and is_device_ignored(name, vid, pid):
+            # Internal hardware is ALWAYS ignored
+            if is_device_ignored(name, vid, pid):
+                continue
+            if not include_ignored and _is_user_hidden(name, vid, pid):
                 continue
             if is_profile_already_mapped(vid, pid, profiles, ignored=ignored, dev_name=name):
                 continue
@@ -243,7 +270,9 @@ def scan_unmapped_devices(
         bt_devs = eng._poll_bluetooth_peripheral_batteries()
         for bt_name, bt_pct, bt_source, bt_modalias, bt_icon in bt_devs:
             vid, pid = _parse_modalias_vid_pid(bt_modalias) if bt_modalias else (0, 0)
-            if not include_ignored and is_device_ignored(bt_name, vid or 0, pid or 0):
+            if is_device_ignored(bt_name, vid or 0, pid or 0):
+                continue
+            if not include_ignored and _is_user_hidden(bt_name, vid or 0, pid or 0):
                 continue
             if vid and pid and is_profile_already_mapped(vid, pid, profiles, ignored=ignored, dev_name=bt_name):
                 continue

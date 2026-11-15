@@ -8,11 +8,11 @@ from PySide6.QtWidgets import (
     QFrame, QLineEdit, QComboBox, QScrollArea, QWidget, QMessageBox,
     QSizePolicy, QApplication
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QCursor
 
 from areyoulowbattery.models import DeviceCategory, CATEGORY_ICONS, DeviceProfile
-from areyoulowbattery.vector_icons import render_category_pixmap, get_app_icon
+from areyoulowbattery.vector_icons import render_category_pixmap, render_category_icon, get_app_icon
 from areyoulowbattery.discovery import (
     DiscoveredDevice, scan_unmapped_devices, probe_device_protocol, save_custom_profile
 )
@@ -49,6 +49,12 @@ class DeviceConfigCard(QFrame):
             }
             QLineEdit:focus, QComboBox:focus {
                 border: 1px solid #38bdf8;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #0f172a;
+                color: #f8fafc;
+                selection-background-color: #334155;
+                border: 1px solid #475569;
             }
             QPushButton#actionBtn {
                 background-color: #0284c7;
@@ -131,16 +137,17 @@ class DeviceConfigCard(QFrame):
         lbl_cat.setFixedWidth(65)
         lbl_cat.setStyleSheet("color: #94a3b8; font-size: 12px;")
         self.cmb_cat = QComboBox()
+        self.cmb_cat.setIconSize(QSize(16, 16))
         cats = [
-            ("🔋 Other", DeviceCategory.OTHER, "🔋"),
-            ("🖱️ Mouse", DeviceCategory.MOUSE, "🖱️"),
-            ("⌨️ Keyboard", DeviceCategory.KEYBOARD, "⌨️"),
-            ("🎧 Headset", DeviceCategory.HEADSET, "🎧"),
-            ("🎮 Gamepad", DeviceCategory.GAMEPAD, "🎮"),
+            ("Other", DeviceCategory.OTHER, "🔋"),
+            ("Mouse", DeviceCategory.MOUSE, "🖱️"),
+            ("Keyboard", DeviceCategory.KEYBOARD, "⌨️"),
+            ("Headset", DeviceCategory.HEADSET, "🎧"),
+            ("Gamepad", DeviceCategory.GAMEPAD, "🎮"),
         ]
         default_cat_idx = 0
         for idx, (label, cat_enum, ico) in enumerate(cats):
-            self.cmb_cat.addItem(label, (cat_enum, ico))
+            self.cmb_cat.addItem(render_category_icon(cat_enum, size=16, color="#38bdf8"), label, (cat_enum, ico))
             if cat_enum == dev.suggested_category:
                 default_cat_idx = idx
         self.cmb_cat.setCurrentIndex(default_cat_idx)

@@ -1040,16 +1040,25 @@ class TestAreYouLowBattery(unittest.TestCase):
         ]
         mock_bt = [("Pebble Keys 2 K380s", 95, "Windows Registry", None, "input-keyboard")]
         with patch("areyoulowbattery.discovery.enumerate_hidraw", return_value=nodes), \
-             patch("areyoulowbattery.discovery.is_device_ignored", return_value=True), \
+             patch("glob.glob", return_value=[]), \
+             patch("areyoulowbattery.engine.load_ignored_devices", return_value={"USB Receiver", "Pebble Keys 2 K380s"}), \
              patch("areyoulowbattery.engine.BatteryEngine._poll_bluetooth_peripheral_batteries", return_value=mock_bt):
-            # When include_ignored=False, ignored devices are omitted
+            # When include_ignored=False, user-ignored devices are omitted
             unmapped_clean = scan_unmapped_devices([], include_ignored=False)
             self.assertEqual(len(unmapped_clean), 0)
-            # When include_ignored=True, both ignored USB and Bluetooth devices are returned to allow restore!
+            # When include_ignored=True, both user-ignored USB and Bluetooth devices are returned to allow restore!
             unmapped_all = scan_unmapped_devices([], include_ignored=True)
             names = [d.name for d in unmapped_all]
             self.assertIn("USB Receiver", names)
             self.assertIn("Pebble Keys 2 K380s", names)
+
+        # Hardware blacklisted devices (root hubs, webcams, etc.) must NEVER be returned, even with include_ignored=True
+        with patch("areyoulowbattery.discovery.enumerate_hidraw", return_value=nodes), \
+             patch("glob.glob", return_value=[]), \
+             patch("areyoulowbattery.discovery.is_device_ignored", return_value=True), \
+             patch("areyoulowbattery.engine.BatteryEngine._poll_bluetooth_peripheral_batteries", return_value=mock_bt):
+            unmapped_hw = scan_unmapped_devices([], include_ignored=True)
+            self.assertEqual(len(unmapped_hw), 0)
 
     def test_is_profile_already_mapped_with_ignored_and_generic_profile(self):
         from areyoulowbattery.discovery import is_profile_already_mapped
@@ -1161,6 +1170,28 @@ class TestAreYouLowBattery(unittest.TestCase):
                         content = f.read()
                         self.assertIn("StartupWMClass=areyoulowbattery", content)
                         self.assertIn("Icon=areyoulowbattery", content)
+
+    def test_vector_icons_and_host_controller_category_inference(self):
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance() or QApplication(["test", "-platform", "offscreen"])
+        from areyoulowbattery.vector_icons import render_category_icon
+        from areyoulowbattery.models import DeviceCategory
+        from areyoulowbattery.discovery import _infer_category_and_icon
+
+        # Host Controller must NEVER be inferred as Gamepad
+        cat, ico = _infer_category_and_icon("xHCI Host Controller")
+        self.assertEqual(cat, DeviceCategory.OTHER)
+        self.assertEqual(ico, "🔋")
+
+        # Game controller must be GAMEPAD
+        cat, ico = _infer_category_and_icon("Xbox Wireless Controller")
+        self.assertEqual(cat, DeviceCategory.GAMEPAD)
+        self.assertEqual(ico, "🎮")
+
+        # Vector icon must render valid QIcon for all categories
+        for c in (DeviceCategory.MOUSE, DeviceCategory.KEYBOARD, DeviceCategory.HEADSET, DeviceCategory.GAMEPAD, DeviceCategory.OTHER):
+            icon = render_category_icon(c, size=18)
+            self.assertFalse(icon.isNull())
 
 
 if __name__ == "__main__":
