@@ -346,10 +346,6 @@ def audit_tray_context_menu():
     act_auto.setCheckable(True)
     act_auto.setChecked(True)
 
-    act_game = menu.addAction("Game Mode: Polling Paused")
-    act_game.setCheckable(True)
-    act_game.setChecked(True)
-
     menu.addSeparator()
     menu.addAction("Export diagnostics (support bundle)...")
     menu.addAction("Quit")
