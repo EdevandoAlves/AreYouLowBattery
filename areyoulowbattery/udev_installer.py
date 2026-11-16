@@ -129,9 +129,23 @@ def install_udev_rules(parent=None) -> bool:
                     "Your 2.4G wireless peripherals are now accessible without root."
                 )
             return True
-        elif proc.returncode in (126, 127):
+        elif proc.returncode == 126:
             # User dismissed the graphical authentication prompt
-            logger.info("udev rule installation canceled by user (exit code %d)", proc.returncode)
+            logger.info("udev rule installation canceled by user (exit code 126)")
+            return False
+        elif proc.returncode == 127:
+            # Not authorized: wrong password, polkit denied, or no authentication agent running
+            err = proc.stderr.strip() or proc.stdout.strip() or "Not authorized"
+            logger.warning("pkexec udev rule install not authorized: %s", err)
+            if parent:
+                QMessageBox.warning(
+                    parent,
+                    "Authorization Failed",
+                    "Administrator authorization was denied or unavailable.\n\n"
+                    "Try again and enter your password, or install manually in a terminal:\n\n"
+                    f"sudo cp '{rules_src}' {TARGET_RULES_PATH}\n"
+                    "sudo udevadm control --reload && sudo udevadm trigger"
+                )
             return False
         else:
             err = proc.stderr.strip() or proc.stdout.strip() or f"Process exited with code {proc.returncode}"

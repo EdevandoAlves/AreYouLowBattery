@@ -1250,6 +1250,18 @@ class TestAreYouLowBattery(unittest.TestCase):
                 with patch("subprocess.run", return_value=mock_proc_cancel):
                     self.assertFalse(install_udev_rules(None))
 
+        # 6. Not authorized (exit 127) must fail loudly instead of looking like a silent cancel
+        mock_proc_denied = MagicMock()
+        mock_proc_denied.returncode = 127
+        mock_proc_denied.stderr = "Error executing command as another user: Not authorized"
+        mock_proc_denied.stdout = ""
+        with patch("sys.platform", "linux"):
+            with patch("shutil.which", return_value="/usr/bin/pkexec"):
+                with patch("subprocess.run", return_value=mock_proc_denied):
+                    with patch("areyoulowbattery.udev_installer.logger") as mock_log:
+                        self.assertFalse(install_udev_rules(None))
+                        mock_log.warning.assert_called()
+
 
 if __name__ == "__main__":
     unittest.main()
