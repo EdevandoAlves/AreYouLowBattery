@@ -1263,5 +1263,66 @@ class TestAreYouLowBattery(unittest.TestCase):
                         mock_log.warning.assert_called()
 
 
+    def test_gamemode_shared_detection_and_non_game_fullscreen(self):
+        from areyoulowbattery import gamemode
+
+        # Browsers / media players in fullscreen are never games
+        for exe in ("chrome.exe", "firefox.exe", "vlc.exe", "mpv.exe", "msedge.exe"):
+            self.assertTrue(gamemode.is_non_game_fullscreen_exe(exe), exe)
+        for exe in ("cs2.exe", "valorant-win64-shipping.exe", ""):
+            self.assertFalse(gamemode.is_non_game_fullscreen_exe(exe), exe)
+
+        # Linux process scan finds a game and ignores unrelated processes
+        def fake_readlink(path):
+            return {"/proc/101/exe": "/usr/bin/firefox", "/proc/202/exe": "/games/cs2"}[path]
+
+        with patch("os.listdir", return_value=["101", "202", "self"]), \
+             patch("os.readlink", side_effect=fake_readlink):
+            self.assertTrue(gamemode._linux_game_running(my_pid=1))
+
+        with patch("os.listdir", return_value=["101"]), \
+             patch("os.readlink", return_value="/usr/bin/firefox"):
+            self.assertFalse(gamemode._linux_game_running(my_pid=1))
+
+        # TTL cache: second call within ttl must not rescan
+        gamemode._last_check_ts = 0.0
+        with patch.object(gamemode, "_linux_game_running", return_value=True) as scan, \
+             patch("sys.platform", "linux"):
+            self.assertTrue(gamemode.is_game_active(ttl=60))
+            self.assertTrue(gamemode.is_game_active(ttl=60))
+            scan.assert_called_once()
+        gamemode._last_check_ts = 0.0
+        gamemode._cached_state = False
+
+    def test_cli_poll_never_touches_hardware_in_game(self):
+        import cli
+
+        with patch.object(cli, "is_game_active", return_value=True), \
+             patch.object(cli, "BatteryEngine") as engine_cls, \
+             patch("os.path.exists", return_value=False):
+            self.assertEqual(cli.read_from_cache_or_poll(force_poll=True), [])
+            engine_cls.assert_not_called()
+
+    def test_daemon_loop_passes_in_game_to_engine(self):
+        import cli
+
+        engine = MagicMock()
+        engine.poll_all_devices.return_value = []
+
+        class Stop(Exception):
+            pass
+
+        with patch.object(cli, "BatteryEngine", return_value=engine), \
+             patch.object(cli, "is_game_active", return_value=True), \
+             patch("areyoulowbattery.transport.get_hid_topology_signature", return_value="sig"), \
+             patch("builtins.open", mock_open()), \
+             patch("os.replace"), \
+             patch("time.sleep", side_effect=Stop):
+            with self.assertRaises(Stop):
+                cli.run_daemon_loop()
+        engine.poll_all_devices.assert_called_once_with(in_game=True)
+
+
+
 if __name__ == "__main__":
     unittest.main()
