@@ -98,16 +98,20 @@ def render_gear_icon(size: int = 16, color: str = "#cbd5e1") -> QIcon:
     p = QPainter(pix)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     pen = QPen(QColor(color), 1.8)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     p.setPen(pen)
     p.setBrush(Qt.BrushStyle.NoBrush)
     s = size / 16.0
     p.scale(s, s)
-    p.drawEllipse(QRectF(5, 5, 6, 6))
-    for angle in (0, 45, 90, 135):
+
+    # Center circle rim
+    p.drawEllipse(QRectF(4.5, 4.5, 7.0, 7.0))
+    # Outer cogs (6 teeth)
+    for angle in (0, 60, 120, 180, 240, 300):
         p.save()
-        p.translate(8, 8)
+        p.translate(8.0, 8.0)
         p.rotate(angle)
-        p.drawLine(-7, 0, 7, 0)
+        p.drawLine(4.8, 0, 7.2, 0)
         p.restore()
     p.end()
     return QIcon(pix)
@@ -125,6 +129,32 @@ def render_close_icon(size: int = 16, color: str = "#cbd5e1") -> QIcon:
     p.scale(s, s)
     p.drawLine(4, 4, 12, 12)
     p.drawLine(12, 4, 4, 12)
+    p.end()
+    return QIcon(pix)
+
+
+def render_zap_icon(size: int = 14, color: str = "#cbd5e1") -> QIcon:
+    """Renders a crisp vector lightning bolt icon for test/probe buttons."""
+    pix = QPixmap(size, size)
+    pix.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(QColor(color)))
+
+    s = size / 16.0
+    p.scale(s, s)
+
+    path = QPainterPath()
+    path.moveTo(9.5, 1.0)
+    path.lineTo(3.5, 9.0)
+    path.lineTo(8.0, 9.0)
+    path.lineTo(6.5, 15.0)
+    path.lineTo(12.5, 7.0)
+    path.lineTo(8.0, 7.0)
+    path.closeSubpath()
+
+    p.drawPath(path)
     p.end()
     return QIcon(pix)
 

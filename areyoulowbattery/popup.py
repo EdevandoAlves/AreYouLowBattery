@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QFrame, QApplication, QMenu
 )
 from PySide6.QtCore import Qt, QPoint, QEvent, QRectF, QSize
-from PySide6.QtGui import QCursor, QGuiApplication, QPainter, QColor, QPainterPath
+from PySide6.QtGui import QCursor, QGuiApplication, QPainter, QColor, QPainterPath, QFontMetrics
 
 from areyoulowbattery.models import DeviceProfile, BatteryStatus
 from areyoulowbattery.vector_icons import (
@@ -120,8 +120,13 @@ class DeviceCard(QFrame):
         icon_lbl.setFixedSize(20, 20)
         top_row.addWidget(icon_lbl)
 
-        name_lbl = QLabel(profile.name)
+        name_lbl = QLabel()
         name_lbl.setStyleSheet("font-size: 13px; font-weight: 600; color: #f1f5f9;")
+        fm = QFontMetrics(name_lbl.font())
+        elided_name = fm.elidedText(profile.name, Qt.TextElideMode.ElideRight, 175)
+        name_lbl.setText(elided_name)
+        if elided_name != profile.name:
+            name_lbl.setToolTip(profile.name)
         top_row.addWidget(name_lbl, 1)
 
         if status.requires_bluetooth:
@@ -457,8 +462,9 @@ class BatteryPopup(QWidget):
             eb_layout = QVBoxLayout(empty_box)
             eb_layout.setSpacing(10)
             empty_lbl = QLabel("No supported wireless peripheral detected.")
-            empty_lbl.setStyleSheet("font-size: 12px; color: #94a3b8; border: none;")
+            empty_lbl.setStyleSheet("font-size: 12px; color: #94a3b8; border: none; padding: 4px 10px;")
             empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_lbl.setWordWrap(True)
             eb_layout.addWidget(empty_lbl)
 
             find_btn = QPushButton(" Find New Devices")

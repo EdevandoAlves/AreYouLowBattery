@@ -1180,7 +1180,7 @@ class TestAreYouLowBattery(unittest.TestCase):
     def test_vector_icons_and_host_controller_category_inference(self):
         from PySide6.QtWidgets import QApplication
         app = QApplication.instance() or QApplication(["test", "-platform", "offscreen"])
-        from areyoulowbattery.vector_icons import render_category_icon
+        from areyoulowbattery.vector_icons import render_category_icon, render_zap_icon
         from areyoulowbattery.models import DeviceCategory
         from areyoulowbattery.discovery import _infer_category_and_icon
 
@@ -1194,10 +1194,13 @@ class TestAreYouLowBattery(unittest.TestCase):
         self.assertEqual(cat, DeviceCategory.GAMEPAD)
         self.assertEqual(ico, "🎮")
 
-        # Vector icon must render valid QIcon for all categories
+        # Vector icon must render valid QIcon for all categories and actions
         for c in (DeviceCategory.MOUSE, DeviceCategory.KEYBOARD, DeviceCategory.HEADSET, DeviceCategory.GAMEPAD, DeviceCategory.OTHER):
             icon = render_category_icon(c, size=18)
             self.assertFalse(icon.isNull())
+
+        zap_icon = render_zap_icon(size=14)
+        self.assertFalse(zap_icon.isNull())
 
     def test_udev_installer_linux_detection_and_windows_isolation(self):
         from areyoulowbattery.udev_installer import (
