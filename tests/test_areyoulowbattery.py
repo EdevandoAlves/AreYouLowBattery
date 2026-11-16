@@ -1180,7 +1180,7 @@ class TestAreYouLowBattery(unittest.TestCase):
     def test_vector_icons_and_host_controller_category_inference(self):
         from PySide6.QtWidgets import QApplication
         app = QApplication.instance() or QApplication(["test", "-platform", "offscreen"])
-        from areyoulowbattery.vector_icons import render_category_icon
+        from areyoulowbattery.vector_icons import render_category_icon, render_zap_icon
         from areyoulowbattery.models import DeviceCategory
         from areyoulowbattery.discovery import _infer_category_and_icon
 
@@ -1194,10 +1194,13 @@ class TestAreYouLowBattery(unittest.TestCase):
         self.assertEqual(cat, DeviceCategory.GAMEPAD)
         self.assertEqual(ico, "🎮")
 
-        # Vector icon must render valid QIcon for all categories
+        # Vector icon must render valid QIcon for all categories and actions
         for c in (DeviceCategory.MOUSE, DeviceCategory.KEYBOARD, DeviceCategory.HEADSET, DeviceCategory.GAMEPAD, DeviceCategory.OTHER):
             icon = render_category_icon(c, size=18)
             self.assertFalse(icon.isNull())
+
+        zap_icon = render_zap_icon(size=14)
+        self.assertFalse(zap_icon.isNull())
 
     def test_udev_installer_linux_detection_and_windows_isolation(self):
         from areyoulowbattery.udev_installer import (
@@ -1246,6 +1249,79 @@ class TestAreYouLowBattery(unittest.TestCase):
             with patch("shutil.which", return_value="/usr/bin/pkexec"):
                 with patch("subprocess.run", return_value=mock_proc_cancel):
                     self.assertFalse(install_udev_rules(None))
+
+        # 6. Not authorized (exit 127) must fail loudly instead of looking like a silent cancel
+        mock_proc_denied = MagicMock()
+        mock_proc_denied.returncode = 127
+        mock_proc_denied.stderr = "Error executing command as another user: Not authorized"
+        mock_proc_denied.stdout = ""
+        with patch("sys.platform", "linux"):
+            with patch("shutil.which", return_value="/usr/bin/pkexec"):
+                with patch("subprocess.run", return_value=mock_proc_denied):
+                    with patch("areyoulowbattery.udev_installer.logger") as mock_log:
+                        self.assertFalse(install_udev_rules(None))
+                        mock_log.warning.assert_called()
+
+
+    def test_gamemode_shared_detection_and_non_game_fullscreen(self):
+        from areyoulowbattery import gamemode
+
+        # Browsers / media players in fullscreen are never games
+        for exe in ("chrome.exe", "firefox.exe", "vlc.exe", "mpv.exe", "msedge.exe"):
+            self.assertTrue(gamemode.is_non_game_fullscreen_exe(exe), exe)
+        for exe in ("cs2.exe", "valorant-win64-shipping.exe", ""):
+            self.assertFalse(gamemode.is_non_game_fullscreen_exe(exe), exe)
+
+        # Linux process scan finds a game and ignores unrelated processes
+        def fake_readlink(path):
+            return {"/proc/101/exe": "/usr/bin/firefox", "/proc/202/exe": "/games/cs2"}[path]
+
+        with patch("os.listdir", return_value=["101", "202", "self"]), \
+             patch("os.readlink", side_effect=fake_readlink):
+            self.assertTrue(gamemode._linux_game_running(my_pid=1))
+
+        with patch("os.listdir", return_value=["101"]), \
+             patch("os.readlink", return_value="/usr/bin/firefox"):
+            self.assertFalse(gamemode._linux_game_running(my_pid=1))
+
+        # TTL cache: second call within ttl must not rescan
+        gamemode._last_check_ts = 0.0
+        with patch.object(gamemode, "_linux_game_running", return_value=True) as scan, \
+             patch("sys.platform", "linux"):
+            self.assertTrue(gamemode.is_game_active(ttl=60))
+            self.assertTrue(gamemode.is_game_active(ttl=60))
+            scan.assert_called_once()
+        gamemode._last_check_ts = 0.0
+        gamemode._cached_state = False
+
+    def test_cli_poll_never_touches_hardware_in_game(self):
+        import cli
+
+        with patch.object(cli, "is_game_active", return_value=True), \
+             patch.object(cli, "BatteryEngine") as engine_cls, \
+             patch("os.path.exists", return_value=False):
+            self.assertEqual(cli.read_from_cache_or_poll(force_poll=True), [])
+            engine_cls.assert_not_called()
+
+    def test_daemon_loop_passes_in_game_to_engine(self):
+        import cli
+
+        engine = MagicMock()
+        engine.poll_all_devices.return_value = []
+
+        class Stop(Exception):
+            pass
+
+        with patch.object(cli, "BatteryEngine", return_value=engine), \
+             patch.object(cli, "is_game_active", return_value=True), \
+             patch("areyoulowbattery.transport.get_hid_topology_signature", return_value="sig"), \
+             patch("builtins.open", mock_open()), \
+             patch("os.replace"), \
+             patch("time.sleep", side_effect=Stop):
+            with self.assertRaises(Stop):
+                cli.run_daemon_loop()
+        engine.poll_all_devices.assert_called_once_with(in_game=True)
+
 
 
 if __name__ == "__main__":

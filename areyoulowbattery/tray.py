@@ -823,84 +823,10 @@ def run_tray(auto_show: bool = False):
     dynamic_actions = []
     # Tracks notification levels per device: key = profile.name, value = set of triggered thresholds (e.g. {15, 5})
     notified_thresholds: dict[str, set[int]] = {}
-    _last_game_check_ts = 0.0
-    _cached_game_state = False
-
     def is_fullscreen_or_game_running(ttl: float = 15.0) -> bool:
-        """
-        Detects if a competitive game (CS2, Dota 2, Apex, etc.) is running.
-        Prevents popping notifications that could cause stutter or distraction during matches.
-        Results are cached for `ttl` seconds to avoid traversing /proc continuously.
-        """
-        nonlocal _last_game_check_ts, _cached_game_state
-        now = time.time()
-        if now - _last_game_check_ts < ttl:
-            return _cached_game_state
-
-        _last_game_check_ts = now
-        game_signatures = {
-            "cs2", "csgo_linux64", "dota2", "steam_app_",
-            "valorant.exe", "overwatch.exe", "r5apex.exe",
-            "pubg.exe", "fortnite.exe", "deadlock"
-        }
-        my_pid = os.getpid()
-        if sys.platform != "win32":
-            try:
-                for pid_str in os.listdir("/proc"):
-                    if not pid_str.isdigit() or int(pid_str) == my_pid:
-                        continue
-                    try:
-                        exe_name = os.path.basename(os.readlink(f"/proc/{pid_str}/exe")).lower()
-                        if exe_name in game_signatures or any(sig in exe_name for sig in ("cs2", "dota2", "steam_app", "deadlock")):
-                            _cached_game_state = True
-                            return True
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-        elif sys.platform == "win32":
-            try:
-                import ctypes
-                from ctypes import wintypes
-                user32 = ctypes.windll.user32
-                hwnd = user32.GetForegroundWindow()
-                if hwnd:
-                    class_buf = ctypes.create_unicode_buffer(256)
-                    user32.GetClassNameW(hwnd, class_buf, 256)
-                    c_name = class_buf.value
-                    if c_name not in ("Progman", "WorkerW", "Shell_TrayWnd", "DV2ControlHost"):
-                        pid = wintypes.DWORD()
-                        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-                        if pid.value and pid.value != my_pid:
-                            kernel32 = ctypes.windll.kernel32
-                            # PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-                            h_proc = kernel32.OpenProcess(0x1000, False, pid.value)
-                            if h_proc:
-                                try:
-                                    exe_buf = ctypes.create_unicode_buffer(1024)
-                                    buf_size = wintypes.DWORD(1024)
-                                    if kernel32.QueryFullProcessImageNameW(h_proc, 0, exe_buf, ctypes.byref(buf_size)):
-                                        fg_exe = os.path.basename(exe_buf.value).lower()
-                                        if any(sig in fg_exe for sig in ("cs2", "csgo", "dota2", "valorant", "r5apex", "overwatch", "pubg", "fortnite", "deadlock", "steam_app")):
-                                            _cached_game_state = True
-                                            return True
-                                finally:
-                                    kernel32.CloseHandle(h_proc)
-
-                        # Check if foreground window covers primary screen (exclusive or borderless fullscreen)
-                        rect = wintypes.RECT()
-                        if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-                            screen_w = user32.GetSystemMetrics(0)  # SM_CXSCREEN
-                            screen_h = user32.GetSystemMetrics(1)  # SM_CYSCREEN
-                            w = rect.right - rect.left
-                            h = rect.bottom - rect.top
-                            if w >= screen_w and h >= screen_h:
-                                _cached_game_state = True
-                                return True
-            except Exception as e:
-                logger.debug("Windows game detection check failed: %s", e)
-        _cached_game_state = False
-        return False
+        """Game Mode detection shared with the daemon/CLI (see areyoulowbattery.gamemode)."""
+        from areyoulowbattery.gamemode import is_game_active
+        return is_game_active(ttl)
 
     def _play_alert_sound(critical: bool = False):
         """

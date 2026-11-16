@@ -18,6 +18,7 @@ from areyoulowbattery.transport import enumerate_hidraw
 from areyoulowbattery.profile_loader import get_resource_dir
 from areyoulowbattery.models import DeviceProfile, BatteryStatus, DeviceCategory, DeviceMatch
 from areyoulowbattery.clean_env import get_clean_env
+from areyoulowbattery.gamemode import is_game_active
 
 CACHE_DIR = "/dev/shm" if os.path.exists("/dev/shm") else tempfile.gettempdir()
 CACHE_FILE = os.path.join(CACHE_DIR, "areyoulowbattery_status.json")
@@ -112,7 +113,8 @@ def run_daemon_loop(poll_interval: float = 10.0):
 
     while True:
         try:
-            results = engine.poll_all_devices()
+            in_game = is_game_active()
+            results = engine.poll_all_devices(in_game=in_game)
             cached_data = []
             for profile, status in results:
                 cached_data.append({
@@ -147,8 +149,15 @@ def run_daemon_loop(poll_interval: float = 10.0):
                 break
 
 def read_from_cache_or_poll(force_poll: bool = False) -> List[Tuple[DeviceProfile, BatteryStatus]]:
+    # Game Mode: never touch the hardware from the CLI while a game is running.
+    # Serve whatever the daemon/tray cached (any age); if nothing is cached, report nothing.
+    in_game = is_game_active()
+    if in_game:
+        force_poll = False
+
     # Only trust the daemon cache if it was refreshed recently (daemon is alive)
-    cache_fresh = os.path.exists(CACHE_FILE) and time.time() - os.path.getmtime(CACHE_FILE) < 15
+    cache_exists = os.path.exists(CACHE_FILE)
+    cache_fresh = cache_exists and (in_game or time.time() - os.path.getmtime(CACHE_FILE) < 15)
     if not force_poll and cache_fresh:
         try:
             with open(CACHE_FILE, "r") as f:
@@ -175,6 +184,8 @@ def read_from_cache_or_poll(force_poll: bool = False) -> List[Tuple[DeviceProfil
                 return results
         except Exception:
             pass
+    if in_game:
+        return []
     engine = BatteryEngine()
     return engine.poll_all_devices()
 

@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QCursor
 
 from areyoulowbattery.models import DeviceCategory, CATEGORY_ICONS, DeviceProfile
-from areyoulowbattery.vector_icons import render_category_pixmap, render_category_icon, get_app_icon
+from areyoulowbattery.vector_icons import render_category_pixmap, render_category_icon, render_zap_icon, get_app_icon
 from areyoulowbattery.discovery import (
     DiscoveredDevice, scan_unmapped_devices, probe_device_protocol, save_custom_profile
 )
@@ -198,7 +198,9 @@ class DeviceConfigCard(QFrame):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
 
-        self.btn_test = QPushButton("⚡ Test Protocol")
+        self.btn_test = QPushButton("Test Protocol")
+        self.btn_test.setIcon(render_zap_icon(14, "#cbd5e1"))
+        self.btn_test.setIconSize(QSize(14, 14))
         self.btn_test.setObjectName("testBtn")
         self.btn_test.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_test.clicked.connect(self._handle_test)
@@ -235,8 +237,8 @@ class DeviceConfigCard(QFrame):
 
     def _handle_test(self):
         self.btn_test.setEnabled(False)
-        self.btn_test.setText("⏳ Testing...")
-        self.test_status_lbl.setText("⏳ Probing 2.4G telemetry channels (CompX, Nordic, Logitech, Razer, SteelSeries, Corsair, HyperX)...")
+        self.btn_test.setText("Testing...")
+        self.test_status_lbl.setText("Probing 2.4G telemetry channels (CompX, Nordic, Logitech, Razer, SteelSeries, Corsair, HyperX)...")
         self.test_status_lbl.setStyleSheet("font-size: 11px; color: #38bdf8;")
         QApplication.processEvents()
 
@@ -268,14 +270,14 @@ class DeviceConfigCard(QFrame):
                         break
             else:
                 if self.dev.is_xpad or self.dev.suggested_category == DeviceCategory.GAMEPAD:
-                    self.test_status_lbl.setText("ℹ️ Dongle uses standard Xbox/xpad protocol (no 2.4G battery channel). Keep 'Requires Bluetooth'.")
+                    self.test_status_lbl.setText("Dongle uses standard Xbox/xpad protocol (no 2.4G battery channel). Keep 'Requires Bluetooth'.")
                     self.test_status_lbl.setStyleSheet("font-size: 11px; color: #38bdf8;")
                 else:
-                    self.test_status_lbl.setText("ℹ️ No response from 2.4G protocols. If your peripheral also supports Bluetooth, select 'Requires Bluetooth'.")
+                    self.test_status_lbl.setText("No response from 2.4G protocols. If your peripheral also supports Bluetooth, select 'Requires Bluetooth'.")
                     self.test_status_lbl.setStyleSheet("font-size: 11px; color: #facc15;")
         finally:
             self.btn_test.setEnabled(True)
-            self.btn_test.setText("⚡ Test Protocol")
+            self.btn_test.setText("Test Protocol")
 
     def _handle_save(self):
         name = self.txt_name.text().strip()
@@ -410,13 +412,44 @@ class DeviceDiscoveryDialog(QDialog):
 
         # Scrollable area for device cards (Strictly vertical only)
         self.scroll = QScrollArea(self)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll.setStyleSheet("""
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                background: #0f172a;
+                width: 6px;
+                margin: 0px;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:vertical {
+                background: #334155;
+                min-height: 24px;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #475569;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+                background: none;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
+            }
+        """)
+        self.scroll.viewport().setStyleSheet("background: transparent; border: none;")
+        self.scroll.viewport().setAutoFillBackground(False)
 
         self.scroll_content = QWidget()
+        self.scroll_content.setStyleSheet("background: transparent; border: none;")
         self.cards_layout = QVBoxLayout(self.scroll_content)
-        self.cards_layout.setContentsMargins(0, 4, 6, 4)
+        self.cards_layout.setContentsMargins(0, 4, 8, 14)
         self.cards_layout.setSpacing(10)
         self.cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.scroll.setWidget(self.scroll_content)
@@ -492,7 +525,7 @@ class DeviceDiscoveryDialog(QDialog):
             if install_udev_rules(self):
                 msg_title.setText("✓ 2.4G Device Permissions Active")
                 msg_title.setStyleSheet("font-size: 12px; font-weight: 600; color: #4ade80;")
-                msg_desc.setText("Hardened rules active. Rescanning devices...")
+                msg_desc.setText("Hardened rules active. Permissions updated.")
                 btn_install.setText("Update")
                 self._run_scan()
 
