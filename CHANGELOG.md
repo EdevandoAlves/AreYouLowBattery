@@ -11,7 +11,7 @@ All notable changes to **AreYouLowBattery** from release to release are document
 - **Dashboard**: redesigned settings gear icon, long device names are elided with a full-name tooltip, fixed clipped text in the empty state.
 
 ### 🎮 Game Mode Coverage
-- **Daemon and CLI now respect Game Mode**: `--daemon` and `--poll` previously ignored it, so running them next to the tray could still query the hardware during matches. Detection moved to the shared `areyoulowbattery/gamemode.py`; while a game runs, the CLI serves cached data only and never touches the hardware.
+- **Daemon and CLI now respect Game Mode**: `--daemon` and `--poll` previously ignored it, so running them next to the tray could still query the hardware during matches. Detection moved to the shared `areyoulowbattery/gamemode.py`; while a game runs, `--poll` serves cached data only without touching hardware, and `--daemon` / tray block forced refreshes while extending the telemetry refresh interval to 180s (planned low-frequency refresh rather than zero-read forever).
 - **No more false positives on Windows**: fullscreen browsers and media/communication apps (Chrome, Firefox, Edge, VLC, mpv, Discord, Teams, OBS...) no longer trigger Game Mode.
 
 ### 🛡️ udev Installer
