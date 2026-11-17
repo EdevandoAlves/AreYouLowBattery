@@ -9,6 +9,7 @@ from areyoulowbattery.handlers import HANDLER_REGISTRY, get_handler
 from areyoulowbattery.handlers.compx import CompXHandler
 from areyoulowbattery.handlers.nordic import NordicHandler
 from areyoulowbattery.handlers.hidpp import LogitechHidppHandler
+from areyoulowbattery.handlers.yjx import YjxHandler, QUERY_PAYLOAD
 from areyoulowbattery.transport import HidrawDevice
 
 
@@ -40,6 +41,13 @@ class FakeTransport:
         if self.responses:
             return self.responses.pop(0)
         return None
+
+
+# YJX-CHIP hardware capture fixtures (64-byte vendor reports, no report ID)
+YJX_RESPONSE_62 = bytes.fromhex("aa30a50b0a0101013e00" + "00" * 55)
+YJX_RESPONSE_46_CHARGING = bytes.fromhex("aa30a53c0a0101012e01" + "00" * 55)
+YJX_RESPONSE_INVALID = bytes.fromhex("aa30a50b0a010101ff00" + "00" * 55)
+YJX_HEARTBEAT_62 = bytes.fromhex("aafaaec80a010101013e" + "00" * 55)
 
 
 class TestAreYouLowBattery(unittest.TestCase):
@@ -1406,6 +1414,164 @@ class TestAreYouLowBattery(unittest.TestCase):
             self.assertEqual(res, expected)
             mock_setupapi.assert_called_once()
             mock_ps.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # YJX-CHIP (yjx_v1) - frames below are real hardware captures
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _yjx_profile(config=None):
+        return DeviceProfile(
+            name="UnitTest YJX RS7",
+            category=DeviceCategory.MOUSE,
+            icon="🖱️",
+            match=DeviceMatch(vendor_id=0xA8A5, product_id=0x2255, interface_number=2),
+            protocol="yjx_v1",
+            config=config or {"response_timeout": 0.1},
+        )
+
+    def test_yjx_query_parses_62_percent_not_charging(self):
+        handler = YjxHandler()
+        prof = self._yjx_profile()
+        dev = HidrawDevice("/dev/hidraw91", 0xA8A5, 0x2255, 2, "Smailwolf RS7")
+        cache_file = handler._cache_path(prof, dev)
+        if os.path.exists(cache_file):
+            os.remove(cache_file)
+
+        try:
+            transport = FakeTransport([YJX_RESPONSE_62])
+            with patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.yjx.HidrawTransport", return_value=transport):
+                st = handler.read_battery(dev, prof)
+
+            self.assertTrue(st.is_connected)
+            self.assertEqual(st.percentage, 62)
+            self.assertFalse(st.is_charging)
+            self.assertTrue(st.details.startswith("Live report: aa30a50b"))
+            # Safety: only the documented query is ever written (65 bytes, no feature reports)
+            self.assertEqual(len(QUERY_PAYLOAD), 65)
+            self.assertEqual(transport.sent_outputs, [QUERY_PAYLOAD])
+            self.assertEqual(transport.sent_features, [])
+        finally:
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
+
+    def test_yjx_query_parses_46_percent_charging(self):
+        handler = YjxHandler()
+        prof = self._yjx_profile()
+        dev = HidrawDevice("/dev/hidraw90", 0xA8A5, 0x2255, 2, "MCHOSE G7")
+        cache_file = handler._cache_path(prof, dev)
+        if os.path.exists(cache_file):
+            os.remove(cache_file)
+
+        try:
+            transport = FakeTransport([YJX_RESPONSE_46_CHARGING])
+            with patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.yjx.HidrawTransport", return_value=transport):
+                st = handler.read_battery(dev, prof)
+
+            self.assertEqual(st.percentage, 46)
+            self.assertTrue(st.is_charging)
+            self.assertEqual(transport.sent_outputs, [QUERY_PAYLOAD])
+        finally:
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
+
+    def test_yjx_rejects_out_of_range_percentage(self):
+        handler = YjxHandler()
+        prof = self._yjx_profile()
+        dev = HidrawDevice("/dev/hidraw89", 0xA8A5, 0x2255, 2, "EWEADN G5")
+        cache_file = handler._cache_path(prof, dev)
+        if os.path.exists(cache_file):
+            os.remove(cache_file)
+
+        try:
+            # 0xFF (255%) is not a valid battery level: never clamp or invent a percentage
+            with patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.yjx.HidrawTransport", return_value=FakeTransport([YJX_RESPONSE_INVALID])):
+                st = handler.read_battery(dev, prof)
+            self.assertTrue(st is None or st.percentage is None)
+
+            # With a previous reading cached, the invalid frame is ignored and cache is served
+            handler._write_cache(prof, {"percentage": 62, "is_charging": False, "raw": "aa30"}, dev)
+            with patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.yjx.HidrawTransport", return_value=FakeTransport([YJX_RESPONSE_INVALID])):
+                st_cached = handler.read_battery(dev, prof)
+            self.assertEqual(st_cached.percentage, 62)
+            self.assertTrue(st_cached.details.startswith("Cached ("))
+        finally:
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
+
+    def test_yjx_silence_returns_cache_then_none(self):
+        handler = YjxHandler()
+        prof = self._yjx_profile()
+        dev = HidrawDevice("/dev/hidraw88", 0xA8A5, 0x2255, 2, "Smailwolf RS7")
+        cache_file = handler._cache_path(prof, dev)
+        if os.path.exists(cache_file):
+            os.remove(cache_file)
+
+        try:
+            # Sleeping mouse (no answer) and no cache: no percentage is fabricated
+            with patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.yjx.HidrawTransport", return_value=FakeTransport([])):
+                st = handler.read_battery(dev, prof)
+            self.assertIsNone(st)
+
+            # With a cache entry the last known value is served with a "Cached (...)" detail
+            handler._write_cache(prof, {"percentage": 62, "is_charging": False, "raw": "aa30"}, dev)
+            with patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.yjx.HidrawTransport", return_value=FakeTransport([])):
+                st_cached = handler.read_battery(dev, prof)
+            self.assertEqual(st_cached.percentage, 62)
+            self.assertFalse(st_cached.is_charging)
+            self.assertTrue(st_cached.details.startswith("Cached ("))
+        finally:
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
+
+    def test_yjx_profile_loads_and_protocol_registered(self):
+        profiles = [p for p in load_all_profiles() if p.match.vendor_id == 0xA8A5]
+        self.assertEqual(len(profiles), 1)
+        prof = profiles[0]
+        self.assertEqual(prof.protocol, "yjx_v1")
+        self.assertIn(prof.protocol, HANDLER_REGISTRY)
+        self.assertEqual(prof.match.product_ids, [0x2255])
+        self.assertEqual(prof.match.interface_number, 2)
+        self.assertEqual(prof.category, DeviceCategory.MOUSE)
+        self.assertIsNotNone(get_handler(prof.protocol))
+
+    def test_yjx_passive_heartbeat_parses_level(self):
+        handler = YjxHandler()
+        prof = self._yjx_profile({"enable_passive_listen": True, "listen_timeout": 0.1})
+        dev = HidrawDevice("/dev/hidraw87", 0xA8A5, 0x2255, 2, "Smailwolf RS7")
+        cache_file = handler._cache_path(prof, dev)
+        if os.path.exists(cache_file):
+            os.remove(cache_file)
+
+        try:
+            transport = FakeTransport([YJX_HEARTBEAT_62])
+            with patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.yjx.HidrawTransport", return_value=transport):
+                st = handler.read_battery(dev, prof)
+
+            self.assertEqual(st.percentage, 62)
+            self.assertFalse(st.is_charging)
+            self.assertTrue(st.details.startswith("Passive heartbeat: aafaaec8"))
+            # Passive listening must never write anything to the receiver
+            self.assertEqual(transport.sent_outputs, [])
+
+            # Passive mode with no pushed frame falls back to the active documented query
+            os.remove(cache_file)
+            with patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.yjx.HidrawTransport",
+                       side_effect=[FakeTransport([]), FakeTransport([YJX_RESPONSE_62])]):
+                st_fallback = handler.read_battery(dev, prof)
+            self.assertEqual(st_fallback.percentage, 62)
+            self.assertTrue(st_fallback.details.startswith("Live report: aa30"))
+        finally:
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
 
 
 if __name__ == "__main__":
