@@ -1,0 +1,14 @@
+name: "Smailwolf RS7 (YJX-Chip 2.4G Receiver)"
+category: "mouse"
+icon: "🖱️"
+match:
+  vendor_id: "0xa8a5"
+  # YJX-CHIP 2.4GHz receiver shared by Smailwolf RS7, EWEADN G5 and MCHOSE G7
+  product_id: "0x2255"
+  # Vendor collection (usage page 0xFF01, usage 0x10) carries the 64-byte battery reports
+  interface_number: 2
+protocol: "yjx_v1"
+config:
+  response_timeout: 0.5
+  listen_timeout: 4.5
+  enable_passive_listen: false

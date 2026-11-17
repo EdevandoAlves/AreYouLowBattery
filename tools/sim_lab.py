@@ -151,6 +151,7 @@ def run_chaos_matrix() -> int:
                      patch("areyoulowbattery.handlers.steelseries.HidrawTransport", side_effect=_make_tp), \
                      patch("areyoulowbattery.handlers.corsair.HidrawTransport", side_effect=_make_tp), \
                      patch("areyoulowbattery.handlers.hyperx.HidrawTransport", side_effect=_make_tp), \
+                     patch("areyoulowbattery.handlers.yjx.HidrawTransport", side_effect=_make_tp), \
                      patch("areyoulowbattery.handlers.generic_hid.HidrawTransport", side_effect=_make_tp):
                     res = handler.read_battery(dev, prof)
                     if res and res.details and "Handler error" in res.details:

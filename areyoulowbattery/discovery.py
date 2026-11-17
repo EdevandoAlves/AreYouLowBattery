@@ -272,9 +272,12 @@ def scan_unmapped_devices(
             vid, pid = _parse_modalias_vid_pid(bt_modalias) if bt_modalias else (0, 0)
             if is_device_ignored(bt_name, vid or 0, pid or 0):
                 continue
-            if not include_ignored and _is_user_hidden(bt_name, vid or 0, pid or 0):
+            is_hidden = _is_user_hidden(bt_name, vid or 0, pid or 0)
+            if not include_ignored and is_hidden:
                 continue
-            if vid and pid and is_profile_already_mapped(vid, pid, profiles, ignored=ignored, dev_name=bt_name):
+            # Active Bluetooth devices are already monitored natively in the dashboard;
+            # only show them in Find Devices if the user explicitly removed/hid them (to allow restore).
+            if not is_hidden:
                 continue
             key = (vid or 0, pid or (hash(bt_name) & 0xFFFF))
             if key not in candidates:
@@ -308,6 +311,7 @@ VENDOR_PROTOCOL_MAP = {
     0x1D57: ["compx_v1"],                         # CompX / Delux
     0x3554: ["nordic_v1"],                        # Nordic Semiconductor RF (VXE, ATK, Scyrox)
     0x1915: ["nordic_v1"],                        # Nordic Semiconductor
+    0xA8A5: ["yjx_v1"],                           # YJX-CHIP (Smailwolf, EWEADN, MCHOSE)
 }
 
 

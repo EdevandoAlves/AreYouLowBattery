@@ -258,6 +258,7 @@ def run_tray(auto_show: bool = False):
     app.setWindowIcon(get_app_icon())
 
     tray = QSystemTrayIcon()
+    popup = None
     tray.setIcon(_render_tray_icon(None, False, False))
     tray.setToolTip("AreYouLowBattery - Reading peripherals...")
 
@@ -366,6 +367,10 @@ def run_tray(auto_show: bool = False):
     def handle_export_diag():
         from PySide6.QtWidgets import QMessageBox
         from areyoulowbattery.logger import export_diagnostic_report
+        was_visible = popup is not None and popup.isVisible()
+        if was_visible:
+            popup.hide()
+            QApplication.processEvents()
         try:
             path = export_diagnostic_report()
             QMessageBox.information(
@@ -379,6 +384,9 @@ def run_tray(auto_show: bool = False):
                 "Diagnostic Error",
                 f"Could not generate diagnostic report:\n{e}",
             )
+        finally:
+            if was_visible:
+                QTimer.singleShot(100, popup.show_centered_or_tray)
 
     diag_action.triggered.connect(handle_export_diag)
 
@@ -459,6 +467,7 @@ def run_tray(auto_show: bool = False):
             prof = current_supported_devices[0][0]
         else:
             dev_dialog = QDialog()
+            dev_dialog.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
             dev_dialog.setWindowTitle("Select Device")
             dev_dialog.setWindowIcon(get_app_icon())
             dev_dialog.setFixedWidth(350)
@@ -495,6 +504,7 @@ def run_tray(auto_show: bool = False):
             prof = dev_cmb.currentData()
 
         type_dialog = QDialog()
+        type_dialog.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         type_dialog.setWindowTitle("Change Device Type / Icon")
         type_dialog.setWindowIcon(get_app_icon())
         type_dialog.setFixedWidth(360)
@@ -615,6 +625,7 @@ def run_tray(auto_show: bool = False):
 
         modes = [
             ("2.4G CompX / Beken (Ajazz, Delux, Pulsar, Keychron)", "compx_v1", None),
+            ("2.4G YJX-Chip (Smailwolf RS7, EWEADN G5, MCHOSE G7)", "yjx_v1", None),
             ("2.4G Nordic 4K/8K RF (VXE, ATK, Scyrox, Lamzu)", "nordic_v1", None),
             ("2.4G Logitech Lightspeed & Bolt (G Pro, G502, G915)", "hidpp_v2", None),
             ("2.4G Logitech HID++ 1.0 (Legacy Nano Receiver M185/M220)", "hidpp_v1", None),
@@ -760,7 +771,10 @@ def run_tray(auto_show: bool = False):
         wake_event.set()
 
     def handle_open_discovery():
-        was_visible = popup.isVisible() if 'popup' in locals() else False
+        was_visible = popup is not None and popup.isVisible()
+        if was_visible:
+            popup.hide()
+            QApplication.processEvents()
         from areyoulowbattery.discovery_dialog import DeviceDiscoveryDialog
         from areyoulowbattery.profile_loader import load_all_profiles
 
@@ -771,8 +785,10 @@ def run_tray(auto_show: bool = False):
         dlg = DeviceDiscoveryDialog(
             profiles=engine.profiles,
             on_profile_created=on_saved,
-            parent=popup if 'popup' in locals() and popup.isVisible() else None,
+            parent=None,
         )
+        dlg.raise_()
+        dlg.activateWindow()
         dlg.exec()
         if was_visible:
             QTimer.singleShot(100, popup.show_centered_or_tray)
@@ -781,6 +797,9 @@ def run_tray(auto_show: bool = False):
 
     def handle_device_action(action: str, prof: DeviceProfile):
         was_visible = popup.isVisible()
+        if was_visible:
+            popup.hide()
+            QApplication.processEvents()
         if action == "change_protocol":
             prompt_change_protocol(prof)
         elif action == "rename":

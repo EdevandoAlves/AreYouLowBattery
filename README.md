@@ -11,6 +11,16 @@ Works out-of-the-box on **Linux** (KDE Plasma, GNOME, XFCE, Hyprland, Sway, Wayb
 
 ---
 
+## 📸 Interface Preview
+
+<p align="center">
+  <img src="assets/preview_dashboard.png" alt="AreYouLowBattery System Tray Dashboard" width="320" />
+  &nbsp;&nbsp;&nbsp;
+  <img src="assets/preview_discovery.png" alt="AreYouLowBattery Device Discovery Dialog" width="480" />
+</p>
+
+---
+
 ## 📖 About the Project
 
 Most wireless gaming peripherals (especially popular enthusiast brands like Delux, Attack Shark, Ajazz, VXE, ATK, Lamzu, Scyrox, as well as major brands like Logitech, Razer, SteelSeries, Corsair, and HyperX) rely on heavy, bloated proprietary companion suites (like G HUB, Razer Synapse, or iCUE) or offer **no native Linux software at all**.
@@ -18,7 +28,7 @@ Most wireless gaming peripherals (especially popular enthusiast brands like Delu
 **AreYouLowBattery** bridges this gap:
 - **Zero Input Lag:** Directly reads secondary vendor telemetry endpoints (`Interface 1/2`) without ever touching or interrupting the mouse sensor motion stream (`Interface 0`). Tested and validated for competitive gaming (CS2, Valorant, Apex Legends).
 - **Zero-Energy Passive Sleep Guard:** When your peripheral enters deep sleep or is switched off, the monitor completely ceases 2.4GHz RF packet transmission, eliminating RF transceiver wake-ups and saving 100% of your mouse's battery.
-- **Ultra-Lightweight:** Consumes **< 40 MB RAM** and **~0.0% - 0.1% CPU**. Telemetry cache resides in shared memory (`/dev/shm`), causing **0 disk writes/sec** to preserve SSD lifespan.
+- **Low Overhead:** Uses **~0.0% - 0.3% CPU** in idle (~36 MB RAM from source; ~88 MB RSS standalone). Telemetry cache resides in shared memory (`/dev/shm`), causing **0 disk writes/sec** to preserve SSD lifespan.
 - **100% Cross-Platform Parity:** Identical features, protocols, and interface on both Linux and Windows.
 
 > 📋 **For full version history and release patch notes, see [CHANGELOG.md](CHANGELOG.md).**
@@ -39,6 +49,7 @@ Most wireless gaming peripherals (especially popular enthusiast brands like Delu
 | **SteelSeries Wireless (Aerox 3/5/9, Rival 3/650, Arctis 1/7/9, Nova 7)** | `1038:*` | SteelSeries (`steelseries_v1`) | ✅ Supported | Native mouse and headset telemetry probe |
 | **Corsair Slipstream (Dark Core, Katar, Virtuoso, Void, HS80)** | `1b1c:*` | Corsair Slipstream (`corsair_v1`) | ✅ Supported | Direct Slipstream and feature report query |
 | **HyperX Wireless (Cloud Flight/II/Alpha/III, Pulsefire)** | `0951:*` / `03f0:*` | HyperX Wireless (`hyperx_v1`) | ✅ Supported | Vendor command query for headsets and mice |
+| **Smailwolf RS7 / EWEADN G5 / MCHOSE G7** | `a8a5:2255` | YJX-CHIP (`yjx_v1`) | ✅ Supported | Live battery %, charging status, sleep cache (by [@EdevandoAlves](https://github.com/EdevandoAlves)) |
 | **Royalaxe R68** | `25a7:2420` / Bluetooth | CompX / BlueZ Dual-Mode | ✅ Supported | Unifies 2.4G dongle with Bluetooth battery telemetry |
 | **Baseus AeQur GH02** | `10d6:4802` / Bluetooth | Actions Semi / BlueZ Dual-Mode | ✅ Supported | Dual-mode Bluetooth BLE telemetry |
 | **Bluetooth Peripherals (All Brands)** | Bluetooth GATT / UPower | `bluetooth` / `0x180F` | ✅ Supported | Universal BLE Battery Service and HFP telemetry |
@@ -62,6 +73,8 @@ Most wireless gaming peripherals (especially popular enthusiast brands like Delu
 #### Windows 10 & 11 (x64)
 1. Download **`AreYouLowBattery-Windows-Setup.exe`** from the **[Releases](../../releases)** page.
 2. Run the installer. The telemetry dashboard will automatically launch upon completion (`--tray --show`), and the battery indicator will dock next to your system clock in the Taskbar.
+
+> **Note on Windows SmartScreen:** Because this is a free open-source project without a paid Authenticode certificate, Windows Defender SmartScreen may display *"Windows protected your PC"* on first launch. Every release binary is compiled directly from this public repository via [GitHub Actions](.github/workflows/release.yml) — click **More info → Run anyway** if you want to proceed, or run directly from source below.
 
 ---
 
