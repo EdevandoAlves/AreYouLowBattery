@@ -1322,6 +1322,90 @@ class TestAreYouLowBattery(unittest.TestCase):
                 cli.run_daemon_loop()
         engine.poll_all_devices.assert_called_once_with(in_game=True)
 
+    def test_windows_hidpp_survives_read_error_on_locked_collections(self):
+        from areyoulowbattery.handlers.hidpp import LogitechHidppHandler
+        from areyoulowbattery.transport import HidrawDevice, HidrawTransport
+
+        handler = LogitechHidppHandler()
+        prof = DeviceProfile(
+            name="USB Receiver",
+            category=DeviceCategory.MOUSE,
+            icon="🖱️",
+            match=DeviceMatch(vendor_id=0x046D, product_id=0xC534),
+            protocol="hidpp_v2",
+        )
+        kbd = HidrawDevice(r"\\?\HID#VID_046D&PID_C534&MI_00#7&e70d7a1&0&0000\KBD", 0x046D, 0xC534, 0, "USB Receiver", 0x0001)
+        col4 = HidrawDevice(r"\\?\HID#VID_046D&PID_C534&MI_01&Col04#7&32481563&0&0003", 0x046D, 0xC534, 1, "USB Receiver", 0xFF00)
+        col5 = HidrawDevice(r"\\?\HID#VID_046D&PID_C534&MI_01&Col05#7&32481563&0&0004", 0x046D, 0xC534, 1, "USB Receiver", 0xFF00)
+
+        cache_file = handler._cache_path(prof, col4)
+        if os.path.exists(cache_file):
+            os.remove(cache_file)
+
+        class FakeWinTransport:
+            def __init__(self, path, read_only=False):
+                self.path = path
+                self.had_read_error = False
+                self._wrote_10_0d = False
+
+            def open(self):
+                if self.path.lower().endswith("\\kbd"):
+                    raise PermissionError("Windows keyboard collection blocked")
+
+            def close(self):
+                pass
+
+            def __enter__(self):
+                self.open()
+                return self
+
+            def __exit__(self, *args):
+                self.close()
+
+            def write_output_report(self, data):
+                if len(data) >= 4 and data[0] == 0x10 and data[2] == 0x81 and data[3] == 0x0D:
+                    self._wrote_10_0d = True
+
+            def read_input_report(self, length=64, timeout_sec=0.5):
+                if "Col04" in self.path:
+                    raise OSError("read error")
+                if "Col05" in self.path and self._wrote_10_0d:
+                    return bytes([0x10, 0x01, 0x81, 0x0D, 75, 0x00, 0x00])
+                return None
+
+        try:
+            with patch("sys.platform", "win32"), \
+                 patch("areyoulowbattery.handlers.hidpp.enumerate_hidraw", return_value=[kbd, col4, col5]), \
+                 patch("areyoulowbattery.handlers.hidpp.HidrawTransport", side_effect=FakeWinTransport):
+                st = handler.read_battery(kbd, prof)
+                self.assertIsNotNone(st)
+                self.assertTrue(st.is_connected)
+                self.assertEqual(st.percentage, 75)
+        finally:
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
+
+        # HidrawTransport.read_input_report itself must catch OSError and flag had_read_error
+        tp = HidrawTransport(r"\\?\HID#test", read_only=False)
+        tp._hid_device = MagicMock()
+        tp._hid_device.read.side_effect = OSError("read error")
+        with patch("sys.platform", "win32"):
+            self.assertIsNone(tp.read_input_report())
+            self.assertTrue(tp.had_read_error)
+
+    def test_windows_bluetooth_prefers_setupapi_before_powershell(self):
+        from areyoulowbattery.engine import BatteryEngine
+
+        eng = BatteryEngine()
+        expected = [("Pebble_K380s", 80, "Windows SetupAPI", None, "⌨️")]
+        with patch("sys.platform", "win32"), \
+             patch.dict("sys.modules", {"winreg": MagicMock(OpenKey=MagicMock(side_effect=OSError("Access denied")))}), \
+             patch.object(eng, "_query_windows_setupapi_bluetooth", return_value=expected) as mock_setupapi, \
+             patch("subprocess.run") as mock_ps:
+            res = eng._poll_bluetooth_windows()
+            self.assertEqual(res, expected)
+            mock_setupapi.assert_called_once()
+            mock_ps.assert_not_called()
 
 
 if __name__ == "__main__":

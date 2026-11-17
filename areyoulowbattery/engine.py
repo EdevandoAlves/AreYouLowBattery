@@ -446,12 +446,138 @@ class BatteryEngine:
                 return profile
         return None
 
+    def _query_windows_setupapi_bluetooth(self) -> List[Tuple[str, int, str, Optional[str], Optional[str]]]:
+        """
+        Reads DEVPKEY_Device_BatteryPercentage ({104EA319-6EE2-4701-BD47-8DDBF425BBE5}, 2)
+        directly via Win32 setupapi.dll in-process (<10ms, works without admin, zero PowerShell).
+        """
+        results: List[Tuple[str, int, str, Optional[str], Optional[str]]] = []
+        if sys.platform != "win32":
+            return results
+
+        import ctypes
+        from ctypes import wintypes
+
+        class _GUID(ctypes.Structure):
+            _fields_ = [
+                ("Data1", wintypes.DWORD),
+                ("Data2", wintypes.WORD),
+                ("Data3", wintypes.WORD),
+                ("Data4", ctypes.c_ubyte * 8),
+            ]
+
+        class _DEVPROPKEY(ctypes.Structure):
+            _fields_ = [("fmtid", _GUID), ("pid", wintypes.ULONG)]
+
+        class _SP_DEVINFO_DATA(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.DWORD),
+                ("ClassGuid", _GUID),
+                ("DevInst", wintypes.DWORD),
+                ("Reserved", ctypes.c_void_p),
+            ]
+
+        setupapi = ctypes.windll.setupapi
+        setupapi.SetupDiGetClassDevsW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR, wintypes.HWND, wintypes.DWORD]
+        setupapi.SetupDiGetClassDevsW.restype = ctypes.c_void_p
+        setupapi.SetupDiEnumDeviceInfo.argtypes = [ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(_SP_DEVINFO_DATA)]
+        setupapi.SetupDiEnumDeviceInfo.restype = wintypes.BOOL
+        setupapi.SetupDiGetDevicePropertyW.argtypes = [
+            ctypes.c_void_p, ctypes.POINTER(_SP_DEVINFO_DATA), ctypes.POINTER(_DEVPROPKEY),
+            ctypes.POINTER(wintypes.ULONG), ctypes.c_void_p, wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD), wintypes.DWORD,
+        ]
+        setupapi.SetupDiGetDevicePropertyW.restype = wintypes.BOOL
+        setupapi.SetupDiGetDeviceRegistryPropertyW.argtypes = [
+            ctypes.c_void_p, ctypes.POINTER(_SP_DEVINFO_DATA), wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p, wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        setupapi.SetupDiGetDeviceRegistryPropertyW.restype = wintypes.BOOL
+        setupapi.SetupDiDestroyDeviceInfoList.argtypes = [ctypes.c_void_p]
+        setupapi.SetupDiDestroyDeviceInfoList.restype = wintypes.BOOL
+
+        DIGCF_PRESENT = 0x00000002
+        DIGCF_ALLCLASSES = 0x00000004
+        SPDRP_DEVICEDESC = 0x00000000
+        SPDRP_FRIENDLYNAME = 0x0000000C
+        INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+        pkey_battery = _DEVPROPKEY(
+            fmtid=_GUID(
+                0x104EA319,
+                0x6EE2,
+                0x4701,
+                (ctypes.c_ubyte * 8)(0xBD, 0x47, 0x8D, 0xDB, 0xF4, 0x25, 0xBB, 0xE5),
+            ),
+            pid=2,
+        )
+
+        h_dev_info = setupapi.SetupDiGetClassDevsW(None, None, None, DIGCF_PRESENT | DIGCF_ALLCLASSES)
+        if not h_dev_info or h_dev_info == INVALID_HANDLE_VALUE:
+            return results
+
+        seen_names = set()
+        try:
+            dev_info = _SP_DEVINFO_DATA()
+            dev_info.cbSize = ctypes.sizeof(_SP_DEVINFO_DATA)
+            idx = 0
+            prop_type = wintypes.ULONG()
+            req_size = wintypes.DWORD()
+            pct_buf = (ctypes.c_ubyte * 16)()
+            name_buf = ctypes.create_unicode_buffer(512)
+
+            while setupapi.SetupDiEnumDeviceInfo(h_dev_info, idx, ctypes.byref(dev_info)):
+                idx += 1
+                if not setupapi.SetupDiGetDevicePropertyW(
+                    h_dev_info,
+                    ctypes.byref(dev_info),
+                    ctypes.byref(pkey_battery),
+                    ctypes.byref(prop_type),
+                    pct_buf,
+                    ctypes.sizeof(pct_buf),
+                    ctypes.byref(req_size),
+                    0,
+                ):
+                    continue
+
+                if req_size.value < 1:
+                    continue
+                pct = int(pct_buf[0])
+                if not (0 <= pct <= 100):
+                    continue
+
+                name = ""
+                for reg_prop in (SPDRP_FRIENDLYNAME, SPDRP_DEVICEDESC):
+                    if setupapi.SetupDiGetDeviceRegistryPropertyW(
+                        h_dev_info,
+                        ctypes.byref(dev_info),
+                        reg_prop,
+                        None,
+                        name_buf,
+                        ctypes.sizeof(name_buf),
+                        None,
+                    ):
+                        candidate_name = name_buf.value.strip()
+                        if candidate_name:
+                            name = candidate_name
+                            break
+
+                if name and name not in seen_names:
+                    seen_names.add(name)
+                    icon_hint = _infer_bluetooth_icon(name)
+                    results.append((name, pct, "Windows SetupAPI", None, icon_hint))
+        finally:
+            setupapi.SetupDiDestroyDeviceInfoList(h_dev_info)
+
+        return results
+
     def _poll_bluetooth_windows(self) -> List[Tuple[str, int, str, Optional[str], Optional[str]]]:
         """
         Polls connected Bluetooth peripheral batteries on Windows using the native
         Windows PnP Device Property {104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2 (DEVPKEY_Device_BatteryLevel).
-        Tries fast in-process Windows Registry query first, then PowerShell PnP query fallback.
-        Cached for 15s to guarantee 0.0% CPU overhead.
+        Tries fast in-process Windows Registry & SetupAPI queries first, then PowerShell fallback.
+        Cached for 30s to guarantee 0.0% CPU overhead.
         """
         now = time.time()
         if now - self._win_bt_cache_ts < 30.0 and self._win_bt_cache:
@@ -529,7 +655,17 @@ class BatteryEngine:
         except Exception as e:
             logger.debug("Windows registry Bluetooth query failed: %s", e)
 
-        # 2. Fallback: PowerShell PnP query (queries active peripheral PnP devices exposing battery property)
+        # 2. Native in-process Win32 SetupAPI query (<10ms, no PowerShell, works without admin)
+        try:
+            results = self._query_windows_setupapi_bluetooth()
+            if results:
+                self._win_bt_cache = results
+                self._win_bt_cache_ts = now
+                return results
+        except Exception as e:
+            logger.debug("Windows SetupAPI Bluetooth query failed: %s", e)
+
+        # 3. Fallback: PowerShell PnP query (queries active peripheral PnP devices exposing battery property)
         try:
             import subprocess
             ps_script = (
@@ -546,7 +682,7 @@ class BatteryEngine:
                 startupinfo.wShowWindow = subprocess.SW_HIDE
             res = subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
-                capture_output=True, text=True, timeout=8.0, startupinfo=startupinfo
+                capture_output=True, text=True, timeout=12.0, startupinfo=startupinfo
             )
             for line in res.stdout.splitlines():
                 if "|" in line:

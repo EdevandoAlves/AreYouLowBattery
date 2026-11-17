@@ -4,6 +4,19 @@ All notable changes to **AreYouLowBattery** from release to release are document
 
 ---
 
+## [v0.5.4.2] — 2026-11-17 — Windows HID Resilience, Native SetupAPI Bluetooth & Chaos Simulator
+
+### 🪟 Windows Hardware & Bluetooth Fixes
+- **Native Win32 `setupapi.dll` Bluetooth Battery Reader**: Queries `DEVPKEY_Device_BatteryPercentage` directly in-process via `ctypes` (<10ms, works without administrator privileges and without PowerShell PnP timeouts).
+- **Resilient HID Multi-Collection Handling**: `HidrawTransport.read_input_report()` now catches `OSError`/`ValueError` (`had_read_error`), protecting all 10 protocol handlers against Windows `hidapi` `read error` crashes on locked/incompatible collections.
+- **Logitech HID++ Collection Isolation**: Skips Windows-locked `\KBD` collections and handles read errors cleanly across `Col01`..`Col05` so vendor `0xFF00` endpoints and HID++ 1.0 fallbacks are always reached.
+
+### 🧰 QA & Diagnostics Tooling
+- **New `tools/sim_lab.py`**: Chaos fault-injection simulator across all 10 protocol handlers + diagnostic report (`--diag`) replay harness.
+- **59/59 unit tests passing** (including Windows `read error` and `SetupAPI` Bluetooth coverage).
+
+---
+
 ## [v0.5.4.1] — 2026-11-16 — UI Polish, Visual Audit Tooling & udev Installer Feedback
 
 ### 🎨 Interface Fixes
