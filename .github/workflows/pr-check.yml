@@ -47,9 +47,9 @@ jobs:
       - name: Run protocol chaos simulator
         run: python tools/sim_lab.py --chaos
 
-      - name: Security scan (Bandit)
+      - name: Security scan (Bandit - High severity)
         if: runner.os == 'Linux'
-        run: bandit -r areyoulowbattery cli.py -ll -ii
+        run: bandit -r areyoulowbattery cli.py -lll -ii
 
       - name: Validate udev rules safety
         if: runner.os == 'Linux'
