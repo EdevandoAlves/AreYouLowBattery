@@ -4,7 +4,7 @@ Thank you for helping improve **AreYouLowBattery**! To keep users' hardware, OS 
 
 ## 🛡️ Security & Hardware Safety Rules
 
-1. **Target the `develop` branch** — PRs should target `develop`, never `main` directly (merges to `main` trigger automated binary releases).
+1. **Target the `main` branch via Pull Request** — Work in a short-lived feature/fix branch (`feat/...`, `fix/...`, `docs/...`) or fork and open a PR targeting `main`. Direct pushes to `main` are disabled; releases are triggered explicitly via `v*` version tags.
 2. **Protocol Handlers (`areyoulowbattery/handlers/`)**:
    - **Battery telemetry only:** Handlers may only send documented, hardware-confirmed battery status query frames. Never send DPI, lighting, macro, button-remapping, reset, or firmware-update frames.
    - **Never fabricate values:** Reject out-of-range percentages (`> 100` or `< 0`). If a device is asleep or silent, return cached data (with `"Cached (...)"` details) or `None`.

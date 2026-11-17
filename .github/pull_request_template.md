@@ -8,7 +8,7 @@
 - **Notes / Reference:** <!-- Byte layout or docs/ link -->
 
 ## Checklist
-- [ ] PR targets **`develop`** (not `main`)
+- [ ] PR targets **`main`** from a feature/fix branch (not direct push)
 - [ ] `python3 -m unittest discover -s tests -v` passes
 - [ ] `python3 tools/sim_lab.py --chaos` passes with 0 failures
 - [ ] New protocol writes **only** battery query frames (no DPI/config/firmware commands)
