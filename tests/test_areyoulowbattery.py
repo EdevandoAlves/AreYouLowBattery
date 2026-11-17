@@ -10,6 +10,7 @@ from areyoulowbattery.handlers.compx import CompXHandler
 from areyoulowbattery.handlers.nordic import NordicHandler
 from areyoulowbattery.handlers.hidpp import LogitechHidppHandler
 from areyoulowbattery.handlers.yjx import YjxHandler, QUERY_PAYLOAD
+from areyoulowbattery.handlers.gamesir import GamesirHandler, WAKE_PAYLOAD
 from areyoulowbattery.transport import HidrawDevice
 
 
@@ -48,6 +49,16 @@ YJX_RESPONSE_62 = bytes.fromhex("aa30a50b0a0101013e00" + "00" * 55)
 YJX_RESPONSE_46_CHARGING = bytes.fromhex("aa30a53c0a0101012e01" + "00" * 55)
 YJX_RESPONSE_INVALID = bytes.fromhex("aa30a50b0a010101ff00" + "00" * 55)
 YJX_HEARTBEAT_62 = bytes.fromhex("aafaaec80a010101013e" + "00" * 55)
+
+# GameSir Cyclone 2 (3537:100b) hardware capture fixtures (64-byte vendor reports,
+# report ID included as byte 0). b35 = charging flag, b36 = battery level.
+GAMESIR_FRAME_100 = bytes.fromhex(
+    "12808080800f00000000c78e00410001008dff0601c81f5e0100000000"
+    "000000000000006400330006000000000000000000000000007f80848a0f0000000000"
+)
+GAMESIR_EVENT_10 = bytes.fromhex("100600" + "00" * 61)
+GAMESIR_FRAME_100_CHARGING = GAMESIR_FRAME_100[:35] + b"\x01" + GAMESIR_FRAME_100[36:]
+GAMESIR_FRAME_INVALID = GAMESIR_FRAME_100[:36] + b"\xfe" + GAMESIR_FRAME_100[37:]
 
 
 class TestAreYouLowBattery(unittest.TestCase):
@@ -1580,6 +1591,193 @@ class TestAreYouLowBattery(unittest.TestCase):
         finally:
             if os.path.exists(cache_file):
                 os.remove(cache_file)
+
+
+    # ------------------------------------------------------------------
+    # GameSir Cyclone 2 (gamesir_v1) - frames below are real hardware captures
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _gamesir_profile(config=None):
+        return DeviceProfile(
+            name="UnitTest GameSir Cyclone 2",
+            category=DeviceCategory.GAMEPAD,
+            icon="🎮",
+            match=DeviceMatch(vendor_id=0x3537, product_id=0x100B, interface_number=1),
+            protocol="gamesir_v1",
+            config=config or {"response_timeout": 0.1, "query_interval": 60},
+        )
+
+    @staticmethod
+    def _gamesir_cache_cleanup(handler, prof, dev):
+        cache_file = handler._cache_path(prof, dev)
+        if os.path.exists(cache_file):
+            os.remove(cache_file)
+
+    def test_gamesir_wake_parses_100_percent_not_charging(self):
+        handler = GamesirHandler()
+        prof = self._gamesir_profile()
+        dev = HidrawDevice("/dev/hidraw81", 0x3537, 0x100B, 1, "Xbox 360 Controller for Windows")
+        self._gamesir_cache_cleanup(handler, prof, dev)
+
+        try:
+            transport = FakeTransport([GAMESIR_FRAME_100])
+            with patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.gamesir.HidrawTransport", return_value=transport):
+                st = handler.read_battery(dev, prof)
+
+            self.assertTrue(st.is_connected)
+            self.assertEqual(st.percentage, 100)
+            self.assertFalse(st.is_charging)
+            self.assertTrue(st.details.startswith("Live report: 12808080"))
+            # Safety: the wake frame is the ONLY thing ever written (64 bytes, no feature reports)
+            self.assertEqual(len(WAKE_PAYLOAD), 64)
+            self.assertEqual(WAKE_PAYLOAD.hex(), "0f03" + "00" * 62)
+            self.assertEqual(transport.sent_outputs, [WAKE_PAYLOAD])
+            self.assertEqual(transport.sent_features, [])
+        finally:
+            self._gamesir_cache_cleanup(handler, prof, dev)
+
+    def test_gamesir_wake_parses_100_percent_charging(self):
+        handler = GamesirHandler()
+        prof = self._gamesir_profile()
+        dev = HidrawDevice("/dev/hidraw82", 0x3537, 0x100B, 1, "Cyclone 2")
+        self._gamesir_cache_cleanup(handler, prof, dev)
+
+        try:
+            transport = FakeTransport([GAMESIR_FRAME_100_CHARGING])
+            with patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.gamesir.HidrawTransport", return_value=transport):
+                st = handler.read_battery(dev, prof)
+
+            self.assertEqual(st.percentage, 100)
+            self.assertTrue(st.is_charging)
+            self.assertEqual(transport.sent_outputs, [WAKE_PAYLOAD])
+        finally:
+            self._gamesir_cache_cleanup(handler, prof, dev)
+
+    def test_gamesir_ignores_event_report_0x10(self):
+        handler = GamesirHandler()
+        prof = self._gamesir_profile()
+        dev = HidrawDevice("/dev/hidraw83", 0x3537, 0x100B, 1, "Cyclone 2")
+        self._gamesir_cache_cleanup(handler, prof, dev)
+
+        try:
+            # The 0x10 event report carries no battery data and must be skipped silently
+            transport = FakeTransport([GAMESIR_EVENT_10, GAMESIR_FRAME_100])
+            with patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.gamesir.HidrawTransport", return_value=transport):
+                st = handler.read_battery(dev, prof)
+
+            self.assertEqual(st.percentage, 100)
+            self.assertFalse(st.is_charging)
+            self.assertTrue(st.details.startswith("Live report: 12808080"))
+            self.assertEqual(transport.sent_outputs, [WAKE_PAYLOAD])
+        finally:
+            self._gamesir_cache_cleanup(handler, prof, dev)
+
+    def test_gamesir_rejects_out_of_range_percentage(self):
+        handler = GamesirHandler()
+        prof = self._gamesir_profile({"response_timeout": 0.1, "query_interval": 0})
+        dev = HidrawDevice("/dev/hidraw84", 0x3537, 0x100B, 1, "Cyclone 2")
+        self._gamesir_cache_cleanup(handler, prof, dev)
+
+        try:
+            # 0xFE (254%) is not a valid battery level: never clamp or invent a percentage
+            with patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.gamesir.HidrawTransport",
+                       return_value=FakeTransport([GAMESIR_FRAME_INVALID])):
+                st = handler.read_battery(dev, prof)
+            self.assertIsNone(st)
+
+            # With a previous reading cached, the invalid frame is ignored and cache is served
+            handler._write_cache(prof, {"percentage": 100, "is_charging": False, "raw": "1280"}, dev)
+            with patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.gamesir.HidrawTransport",
+                       return_value=FakeTransport([GAMESIR_FRAME_INVALID])):
+                st_cached = handler.read_battery(dev, prof)
+            self.assertEqual(st_cached.percentage, 100)
+            self.assertTrue(st_cached.details.startswith("Cached ("))
+        finally:
+            self._gamesir_cache_cleanup(handler, prof, dev)
+
+    def test_gamesir_silence_returns_cache_then_none(self):
+        handler = GamesirHandler()
+        prof = self._gamesir_profile({"response_timeout": 0.1, "query_interval": 0})
+        dev = HidrawDevice("/dev/hidraw85", 0x3537, 0x100B, 1, "Cyclone 2")
+        self._gamesir_cache_cleanup(handler, prof, dev)
+
+        try:
+            # Sleeping controller (no answer) and no cache: no percentage is fabricated
+            with patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.gamesir.HidrawTransport", return_value=FakeTransport([])):
+                st = handler.read_battery(dev, prof)
+            self.assertIsNone(st)
+
+            # With a cache entry the last known value is served with a "Cached (...)" detail
+            handler._write_cache(prof, {"percentage": 100, "is_charging": False, "raw": "1280"}, dev)
+            with patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.gamesir.HidrawTransport", return_value=FakeTransport([])):
+                st_cached = handler.read_battery(dev, prof)
+            self.assertEqual(st_cached.percentage, 100)
+            self.assertFalse(st_cached.is_charging)
+            self.assertTrue(st_cached.details.startswith("Cached ("))
+        finally:
+            self._gamesir_cache_cleanup(handler, prof, dev)
+
+    def test_gamesir_throttles_queries_within_60s(self):
+        handler = GamesirHandler()
+        prof = self._gamesir_profile()
+        dev = HidrawDevice("/dev/hidraw86", 0x3537, 0x100B, 1, "Cyclone 2")
+        self._gamesir_cache_cleanup(handler, prof, dev)
+
+        try:
+            transport = FakeTransport([GAMESIR_FRAME_100])
+            with patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.gamesir.HidrawTransport", return_value=transport) as mock_tp:
+                st_first = handler.read_battery(dev, prof)
+                st_second = handler.read_battery(dev, prof)
+
+            self.assertEqual(st_first.percentage, 100)
+            self.assertTrue(st_first.details.startswith("Live report: "))
+            # Second call within 60s is answered from cache without any device I/O
+            self.assertEqual(st_second.percentage, 100)
+            self.assertTrue(st_second.details.startswith("Cached ("))
+            self.assertIn("throttled", st_second.details)
+            self.assertEqual(mock_tp.call_count, 1)
+            self.assertEqual(transport.sent_outputs, [WAKE_PAYLOAD])
+        finally:
+            self._gamesir_cache_cleanup(handler, prof, dev)
+
+    def test_gamesir_pid_gate_never_writes(self):
+        handler = GamesirHandler()
+        prof = self._gamesir_profile()
+        # Vendor 0x3537 also covers other PIDs/modes (0x0575 HID, 0x1053 post-flash)
+        dev = HidrawDevice("/dev/hidraw87", 0x3537, 0x0575, 1, "GameSir HID")
+        self._gamesir_cache_cleanup(handler, prof, dev)
+
+        try:
+            transport = FakeTransport([GAMESIR_FRAME_100])
+            with patch("areyoulowbattery.handlers.gamesir.HidrawTransport", return_value=transport) as mock_tp:
+                st = handler.read_battery(dev, prof)
+
+            self.assertIsNone(st)
+            mock_tp.assert_not_called()
+            self.assertEqual(transport.sent_outputs, [])
+        finally:
+            self._gamesir_cache_cleanup(handler, prof, dev)
+
+    def test_gamesir_profile_loads_and_protocol_registered(self):
+        profiles = [p for p in load_all_profiles() if p.match.vendor_id == 0x3537]
+        self.assertEqual(len(profiles), 1)
+        prof = profiles[0]
+        self.assertEqual(prof.protocol, "gamesir_v1")
+        self.assertIn(prof.protocol, HANDLER_REGISTRY)
+        self.assertEqual(prof.match.product_ids, [0x100B])
+        self.assertEqual(prof.match.interface_number, 1)
+        self.assertEqual(prof.category, DeviceCategory.GAMEPAD)
+        self.assertEqual(prof.config.get("query_interval"), 60)
+        self.assertIsInstance(get_handler(prof.protocol), GamesirHandler)
 
 
 if __name__ == "__main__":
