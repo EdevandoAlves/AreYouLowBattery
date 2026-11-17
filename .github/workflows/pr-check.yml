@@ -1,0 +1,67 @@
+name: PR Security & Quality Check
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+          - os: windows-latest
+            platform: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libdbus-1-dev libglib2.0-dev
+          python -m pip install --upgrade pip
+          pip install pyyaml pyside6-essentials dbus-python certifi bandit
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml pyside6-essentials hidapi
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Run protocol chaos simulator
+        run: python tools/sim_lab.py --chaos
+
+      - name: Security scan (Bandit)
+        if: runner.os == 'Linux'
+        run: bandit -r areyoulowbattery cli.py -ll -ii
+
+      - name: Validate udev rules safety
+        if: runner.os == 'Linux'
+        run: |
+          python -c "
+          with open('rules/99-areyoulowbattery.rules', 'r', encoding='utf-8') as f:
+              for idx, raw in enumerate(f, 1):
+                  line = raw.strip()
+                  if not line or line.startswith('#'):
+                      continue
+                  assert 'MODE=\"0666\"' not in line, f'Line {idx}: insecure world-writable MODE=0666 forbidden'
+                  assert 'ATTRS{idVendor}' in line, f'Line {idx}: hidraw rule must scope ATTRS{{idVendor}}'
+                  assert 'TAG+=\"uaccess\"' in line, f'Line {idx}: rule must use TAG+=\"uaccess\"'
+          print('udev rules safety check passed!')
+          "

@@ -49,6 +49,7 @@ Most wireless gaming peripherals (especially popular enthusiast brands like Delu
 | **SteelSeries Wireless (Aerox 3/5/9, Rival 3/650, Arctis 1/7/9, Nova 7)** | `1038:*` | SteelSeries (`steelseries_v1`) | ✅ Supported | Native mouse and headset telemetry probe |
 | **Corsair Slipstream (Dark Core, Katar, Virtuoso, Void, HS80)** | `1b1c:*` | Corsair Slipstream (`corsair_v1`) | ✅ Supported | Direct Slipstream and feature report query |
 | **HyperX Wireless (Cloud Flight/II/Alpha/III, Pulsefire)** | `0951:*` / `03f0:*` | HyperX Wireless (`hyperx_v1`) | ✅ Supported | Vendor command query for headsets and mice |
+| **Smailwolf RS7 / EWEADN G5 / MCHOSE G7** | `a8a5:2255` | YJX-CHIP (`yjx_v1`) | ✅ Supported | Live battery %, charging status, sleep cache (by [@EdevandoAlves](https://github.com/EdevandoAlves)) |
 | **Royalaxe R68** | `25a7:2420` / Bluetooth | CompX / BlueZ Dual-Mode | ✅ Supported | Unifies 2.4G dongle with Bluetooth battery telemetry |
 | **Baseus AeQur GH02** | `10d6:4802` / Bluetooth | Actions Semi / BlueZ Dual-Mode | ✅ Supported | Dual-mode Bluetooth BLE telemetry |
 | **Bluetooth Peripherals (All Brands)** | Bluetooth GATT / UPower | `bluetooth` / `0x180F` | ✅ Supported | Universal BLE Battery Service and HFP telemetry |
