@@ -1,7 +1,7 @@
 # 🔋 AreYouLowBattery
 
 > **Ultra-lightweight, cross-platform peripheral battery telemetry monitor & System Tray indicator for Linux & Windows.**  
-> Monitor your wireless gaming mice, keyboards, and headsets with **zero input lag**, **~0.1% CPU overhead**, and **zero battery drain**.
+> Monitor your wireless gaming mice, keyboards, and headsets with **low-latency Game Mode**, **~0.1% idle CPU overhead**, and **sleep-aware polling**.
 
 Works out-of-the-box on **Linux** (KDE Plasma, GNOME, XFCE, Hyprland, Sway, Waybar, Polybar) and **Windows 10 & 11**.
 
@@ -26,10 +26,10 @@ Works out-of-the-box on **Linux** (KDE Plasma, GNOME, XFCE, Hyprland, Sway, Wayb
 Most wireless gaming peripherals (especially popular enthusiast brands like Delux, Attack Shark, Ajazz, VXE, ATK, Lamzu, Scyrox, as well as major brands like Logitech, Razer, SteelSeries, Corsair, and HyperX) rely on heavy, bloated proprietary companion suites (like G HUB, Razer Synapse, or iCUE) or offer **no native Linux software at all**.
 
 **AreYouLowBattery** bridges this gap:
-- **Zero Input Lag:** Directly reads secondary vendor telemetry endpoints (`Interface 1/2`) without ever touching or interrupting the mouse sensor motion stream (`Interface 0`). Tested and validated for competitive gaming (CS2, Valorant, Apex Legends).
-- **Zero-Energy Passive Sleep Guard:** When your peripheral enters deep sleep or is switched off, the monitor completely ceases 2.4GHz RF packet transmission, eliminating RF transceiver wake-ups and saving 100% of your mouse's battery.
+- **Game Mode & Sensor Isolation:** Reads secondary vendor telemetry endpoints (`Interface 1/2`) without touching the primary motion stream (`Interface 0`). During detected competitive games, forced refreshes are blocked and polling relaxes to 180s.
+- **Passive Sleep Guard:** When a peripheral is confirmed asleep or powered off, active RF polling pauses for 300s to avoid unnecessary transceiver wake-ups.
 - **Low Overhead:** Uses **~0.0% - 0.3% CPU** in idle (~36 MB RAM from source; ~88 MB RSS standalone). Telemetry cache resides in shared memory (`/dev/shm`), causing **0 disk writes/sec** to preserve SSD lifespan.
-- **100% Cross-Platform Parity:** Identical features, protocols, and interface on both Linux and Windows.
+- **Cross-Platform Architecture:** Unified PySide6 UI and protocol engine running on Linux (`hidraw`, `udev`, BlueZ/UPower) and Windows (`hidapi`, Win32 `SetupAPI`), tailored to each OS's native APIs.
 
 > 📋 **For full version history and release patch notes, see [CHANGELOG.md](CHANGELOG.md).**
 
