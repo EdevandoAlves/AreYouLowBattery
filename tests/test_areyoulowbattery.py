@@ -1060,6 +1060,14 @@ class TestAreYouLowBattery(unittest.TestCase):
             unmapped_hw = scan_unmapped_devices([], include_ignored=True)
             self.assertEqual(len(unmapped_hw), 0)
 
+        # Active (non-ignored) Bluetooth devices already monitored in dashboard must NOT clutter Find Devices
+        active_bt = [("Ba-FON240 Hands-Free AG", 90, "Windows SetupAPI", None, "🎧")]
+        with patch("areyoulowbattery.discovery.enumerate_hidraw", return_value=[]), \
+             patch("glob.glob", return_value=[]), \
+             patch("areyoulowbattery.engine.load_ignored_devices", return_value=set()), \
+             patch("areyoulowbattery.engine.BatteryEngine._poll_bluetooth_peripheral_batteries", return_value=active_bt):
+            self.assertEqual(scan_unmapped_devices([], include_ignored=True), [])
+
     def test_is_profile_already_mapped_with_ignored_and_generic_profile(self):
         from areyoulowbattery.discovery import is_profile_already_mapped
         generic_prof = DeviceProfile(

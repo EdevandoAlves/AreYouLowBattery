@@ -4,6 +4,17 @@ All notable changes to **AreYouLowBattery** from release to release are document
 
 ---
 
+## [v0.5.4.3] — 2026-11-17 — Modal Window Z-Order Fix, Clean Bluetooth Discovery & README Showcase
+
+### 🎨 Windows & Desktop UX Fixes
+- **Modals Always Appear Above Dashboard**: The dashboard flyout (`WindowStaysOnTopHint`) now hides cleanly before opening *Find Devices*, *Rename*, *Change Type*, *Change Protocol*, or *Export Diagnostics* and restores automatically when closed, while key dialogs enforce top-most focus so modals never open hidden behind the popup on Windows.
+- **Cleaner Find Devices List**: Active Bluetooth peripherals already monitored natively in the dashboard (e.g., `R68 BT5.0`, `Ba-FON240`) no longer clutter *Find Devices* unless previously hidden/removed by the user.
+
+### 📖 Documentation
+- Added UI preview screenshots (`assets/preview_dashboard.png`, `assets/preview_discovery.png`), honest resource-usage figures, and a transparent Windows SmartScreen note to `README.md`.
+
+---
+
 ## [v0.5.4.2] — 2026-11-17 — Windows HID Resilience, Native SetupAPI Bluetooth & Chaos Simulator
 
 ### 🪟 Windows Hardware & Bluetooth Fixes

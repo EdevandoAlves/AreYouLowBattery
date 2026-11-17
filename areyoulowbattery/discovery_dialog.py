@@ -336,6 +336,7 @@ class DeviceDiscoveryDialog(QDialog):
 
     def __init__(self, profiles: List[DeviceProfile], on_profile_created: Callable[[], None], parent=None):
         super().__init__(parent)
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self.profiles = profiles
         self.on_profile_created = on_profile_created
 
