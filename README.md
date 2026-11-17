@@ -37,23 +37,24 @@ Most wireless gaming peripherals (especially popular enthusiast brands like Delu
 
 ## 🎮 Supported Hardware Matrix
 
+> **Legend:** **✅ Verified** = confirmed on physical hardware · **🧪 Experimental** = protocol implemented, awaiting community hardware validation
+
 | Brand / Device | USB IDs (`VID:PID`) | Protocol / Chipset | Status | Features |
 | :--- | :--- | :--- | :--- | :--- |
-| **Delux M900 Pro** | `1d57:fa65` / `1d57:fa73` | CompX 8K (`compx_v1`) | ✅ Supported | Live %, Magnetic Dock charging (`⚡`), USB-C wired charging, ETA to 100% |
-| **Ajazz AJ199 / AJ139 / AJ159** | `25a7:fa7c` / `25a7:fa7b` | Areson / CompX 1K (`compx_v1`) | ✅ Supported | Feature report `0x08` / `0x09` telemetry, live wired/wireless %, charging ETA |
-| **Attack Shark X11 / X3 / X6** | `1d57:fa60` / `25a7:fa7c` | CompX (`compx_v1`) | ✅ Supported | Automatic detection via CompX 8K (`0x03`) and CompX 1K (`0x08`/`0x09`) |
-| **VXE R1 Pro / Mad R / ATK F1 / Scyrox V8 / Lamzu 4K** | `3554:*` | Nordic nRF52840 4K/8K (`nordic_v1`) | ✅ Supported | Vendor telemetry query without touching the 4K/8K motion endpoint |
-| **Logitech Lightspeed & PRO Series (G Pro X Superlight 1 & 2, G502 X, G303, G703, G915, Bolt)** | `046d:*` | Logitech HID++ 2.0 (`hidpp_v2`) | ✅ Supported | Direct hardware HID++ register query (no G HUB needed!) |
-| **Logitech Nano Receivers (M185, M220, M330, MK270)** | `046d:c534` | Logitech HID++ 1.0 (`hidpp_v1`) | ✅ Supported | Registers `0x0D` (mileage) and `0x07` (status) for popular AA/AAA mice |
-| **Razer HyperSpeed Wireless (Viper, DeathAdder, Basilisk, BlackWidow, Cobra)** | `1532:*` | Razer HyperSpeed (`razer_v1`) | ✅ Supported | Direct 90-byte vendor battery report query (no Synapse needed!) |
-| **SteelSeries Wireless (Aerox 3/5/9, Rival 3/650, Arctis 1/7/9, Nova 7)** | `1038:*` | SteelSeries (`steelseries_v1`) | ✅ Supported | Native mouse and headset telemetry probe |
-| **Corsair Slipstream (Dark Core, Katar, Virtuoso, Void, HS80)** | `1b1c:*` | Corsair Slipstream (`corsair_v1`) | ✅ Supported | Direct Slipstream and feature report query |
-| **HyperX Wireless (Cloud Flight/II/Alpha/III, Pulsefire)** | `0951:*` / `03f0:*` | HyperX Wireless (`hyperx_v1`) | ✅ Supported | Vendor command query for headsets and mice |
-| **Smailwolf RS7 / EWEADN G5 / MCHOSE G7** | `a8a5:2255` | YJX-CHIP (`yjx_v1`) | ✅ Supported | Live battery %, charging status, sleep cache (by [@EdevandoAlves](https://github.com/EdevandoAlves)) |
-| **Royalaxe R68** | `25a7:2420` / Bluetooth | CompX / BlueZ Dual-Mode | ✅ Supported | Unifies 2.4G dongle with Bluetooth battery telemetry |
-| **Baseus AeQur GH02** | `10d6:4802` / Bluetooth | Actions Semi / BlueZ Dual-Mode | ✅ Supported | Dual-mode Bluetooth BLE telemetry |
-| **Bluetooth Peripherals (All Brands)** | Bluetooth GATT / UPower | `bluetooth` / `0x180F` | ✅ Supported | Universal BLE Battery Service and HFP telemetry |
-| **Generic USB Battery Devices** | USB Power Device | `generic_hid` | ✅ Supported | Standard USB-IF HID Power Device (Usage Page `0x85`) |
+| **CompX 1K / 8K Mice (Delux M900 Pro, Ajazz AJ199/AJ139/AJ159, Attack Shark)** | `1d57:*` / `25a7:fa7b` / `25a7:fa7c` | CompX (`compx_v1`) | ✅ Verified | Live %, Magnetic Dock / USB-C charging (`⚡`), ETA to 100% |
+| **Smailwolf RS7 / EWEADN G5 / MCHOSE G7** | `a8a5:2255` | YJX-CHIP (`yjx_v1`) | ✅ Verified | Live battery %, charging status, sleep cache (by [@EdevandoAlves](https://github.com/EdevandoAlves)) |
+| **Royalaxe R68** | `25a7:2420` / Bluetooth | CompX / BLE Dual-Mode | ✅ Verified | Unifies 2.4G dongle with Bluetooth battery telemetry |
+| **Baseus AeQur GH02** | `10d6:4802` / Bluetooth | Actions Semi / BLE Dual-Mode | ✅ Verified | Dual-mode Bluetooth BLE telemetry |
+| **Bluetooth Peripherals (All Brands)** | Bluetooth GATT / UPower / Win32 SetupAPI | `bluetooth` / `0x180F` | ✅ Verified | Universal BLE Battery Service and HFP telemetry (Linux & Windows) |
+| **Logitech Lightspeed, Unifying & Nano Receivers** | `046d:*` / `046d:c534` | Logitech HID++ 1.0/2.0 (`hidpp_v1` / `hidpp_v2`) | 🧪 Experimental | Works via Linux `sysfs`; Windows `hidapi` & legacy Nano receivers (`046d:c534`) under validation |
+| **VXE R1 Pro / Mad R / ATK F1 / Scyrox V8 / Lamzu 4K** | `3554:*` | Nordic nRF52840 4K/8K (`nordic_v1`) | 🧪 Experimental | Protocol implemented; needs real hardware confirmation |
+| **Razer HyperSpeed Wireless** | `1532:*` | Razer HyperSpeed (`razer_v1`) | 🧪 Experimental | Protocol implemented; requires *Find Devices* / auto-detect & hardware testing |
+| **SteelSeries Wireless** | `1038:*` | SteelSeries (`steelseries_v1`) | 🧪 Experimental | Protocol implemented; requires *Find Devices* / auto-detect & hardware testing |
+| **Corsair Slipstream** | `1b1c:*` | Corsair Slipstream (`corsair_v1`) | 🧪 Experimental | Protocol implemented; requires *Find Devices* / auto-detect & hardware testing |
+| **HyperX Wireless** | `0951:*` / `03f0:*` | HyperX Wireless (`hyperx_v1`) | 🧪 Experimental | Protocol implemented; requires *Find Devices* / auto-detect & hardware testing |
+| **Generic USB Battery Devices** | USB Power Device | `generic_hid` | 🧪 Experimental | Standard USB-IF HID Power Device (Usage Page `0x85`) |
+
+> 🛠️ **Device not detected or listed as Experimental?** Run **Export diagnostics** from the tray menu (or `areyoulowbattery --diag`) and open an Issue with the generated `.txt` file — community captures make new devices work fast!
 
 ---
 
