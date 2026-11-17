@@ -159,6 +159,7 @@ class HidrawTransport:
         self.read_only = read_only
         self._fd: Optional[int] = None
         self._hid_device = None
+        self.had_read_error: bool = False
 
     def open(self):
         if sys.platform == "win32":
@@ -236,17 +237,24 @@ class HidrawTransport:
         os.write(self._fd, data)
 
     def read_input_report(self, length: int = 64, timeout_sec: float = 0.5) -> Optional[bytes]:
+        self.had_read_error = False
         if sys.platform == "win32":
             if self._hid_device is None:
                 raise RuntimeError("Device not open")
-            res = self._hid_device.read(length, timeout_ms=int(timeout_sec * 1000))
-            if res:
-                return bytes(res)
+            try:
+                res = self._hid_device.read(length, timeout_ms=int(timeout_sec * 1000))
+                if res:
+                    return bytes(res)
+            except (OSError, ValueError):
+                self.had_read_error = True
             return None
 
         if self._fd is None:
             raise RuntimeError("Device not open")
-        r, _, _ = select.select([self._fd], [], [], timeout_sec)
-        if r:
-            return os.read(self._fd, length)
+        try:
+            r, _, _ = select.select([self._fd], [], [], timeout_sec)
+            if r:
+                return os.read(self._fd, length)
+        except (OSError, ValueError):
+            self.had_read_error = True
         return None

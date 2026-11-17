@@ -132,10 +132,16 @@ class LogitechHidppHandler(BaseProtocolHandler):
 
             deadline = time.time() + 0.18
             while time.time() < deadline:
-                rx = transport.read_input_report(
-                    length=64,
-                    timeout_sec=min(0.08, max(0.01, deadline - time.time()))
-                )
+                try:
+                    rx = transport.read_input_report(
+                        length=64,
+                        timeout_sec=min(0.08, max(0.01, deadline - time.time()))
+                    )
+                except Exception as e:
+                    logger.debug("HID++ read report 0x%02x failed: %s", pkt[0], e)
+                    break
+                if getattr(transport, "had_read_error", False):
+                    break
                 if not rx or len(rx) < 7:
                     continue
                 # Ignore HID++ 1.0 / 2.0 error responses (0x8F / 0xFF)
@@ -180,10 +186,16 @@ class LogitechHidppHandler(BaseProtocolHandler):
 
         deadline = time.time() + 0.18
         while time.time() < deadline:
-            rx = transport.read_input_report(
-                length=64,
-                timeout_sec=min(0.08, max(0.01, deadline - time.time()))
-            )
+            try:
+                rx = transport.read_input_report(
+                    length=64,
+                    timeout_sec=min(0.08, max(0.01, deadline - time.time()))
+                )
+            except Exception as e:
+                logger.debug("HID++ 1.0 read report failed: %s", e)
+                return None
+            if getattr(transport, "had_read_error", False):
+                return None
             if not rx or len(rx) < 7:
                 continue
             if rx[0] == 0x10 and rx[1] == dev_idx and rx[2] == 0x8F:
@@ -245,9 +257,12 @@ class LogitechHidppHandler(BaseProtocolHandler):
                     and "bth" not in (d.dev_path or "").lower()
                     and "{00001124" not in (d.dev_path or "").lower()
                     and "{00001812" not in (d.dev_path or "").lower()
+                    and not (d.dev_path or "").lower().endswith("\\kbd")
                 )
             ]
             candidates.extend(siblings)
+            # Exclude Windows keyboard-locked collections and prioritize vendor-defined 0xFF00 collections
+            candidates = [c for c in candidates if not (c.dev_path or "").lower().endswith("\\kbd")]
             candidates.sort(key=lambda x: (x.usage_page or 0) >= 0xFF00, reverse=True)
 
         is_receiver = "receiver" in (dev.name or "").lower()
