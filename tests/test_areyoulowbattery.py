@@ -50,6 +50,12 @@ YJX_RESPONSE_46_CHARGING = bytes.fromhex("aa30a53c0a0101012e01" + "00" * 55)
 YJX_RESPONSE_INVALID = bytes.fromhex("aa30a50b0a010101ff00" + "00" * 55)
 YJX_HEARTBEAT_62 = bytes.fromhex("aafaaec80a010101013e" + "00" * 55)
 
+# Charging-over-cable captures: byte 8 = live level, byte 9 = charging flag.
+# The 2.4GHz receiver replays its last RF frame (43%, flag 0x00) while on the cable,
+# whereas the wired node (0xa8a4) reports the real, rising level with flag 0x01.
+YJX_RECEIVER_FROZEN_43 = bytes.fromhex("aa30a50b0a0101012b00" + "00" * 55)
+YJX_CABLE_LIVE_87_CHARGING = bytes.fromhex("aa30a50b0a0101015701" + "00" * 55)
+
 # GameSir Cyclone 2 (3537:100b) hardware capture fixtures (64-byte vendor reports,
 # report ID included as byte 0). b35 = charging flag, b36 = battery level.
 GAMESIR_FRAME_100 = bytes.fromhex(
@@ -313,6 +319,30 @@ class TestAreYouLowBattery(unittest.TestCase):
         # 4. Plugged into charger -> immediate update to higher reading
         s4 = engine._filter_battery_jitter(key, BatteryStatus(percentage=85, is_charging=True))
         self.assertEqual(s4.percentage, 85)
+
+    def test_anti_jitter_accepts_charge_completion_right_after_unplug(self):
+        from areyoulowbattery.engine import BatteryEngine
+        from areyoulowbattery.models import BatteryStatus
+        engine = BatteryEngine()
+        key = "Smailwolf RS7:a8a5:2255"
+
+        # 1. On the cable the receiver replays a frozen 43% while the real level rises
+        s1 = engine._filter_battery_jitter(key, BatteryStatus(percentage=43, is_charging=True))
+        self.assertEqual(s1.percentage, 43)
+        self.assertTrue(engine._smoothed_levels[key]["was_charging"])
+        s_rise = engine._filter_battery_jitter(key, BatteryStatus(percentage=46, is_charging=True))
+        self.assertEqual(s_rise.percentage, 46)
+
+        # 2. Cable unplugged at 100%: MUST show 100% immediately (no 60s spike hold)
+        s2 = engine._filter_battery_jitter(key, BatteryStatus(percentage=100, is_charging=False))
+        self.assertEqual(s2.percentage, 100)
+        self.assertFalse(engine._smoothed_levels[key]["was_charging"])
+
+        # 3. The post-charge acceptance is one-shot: a real bounce is still suppressed
+        s3 = engine._filter_battery_jitter(key, BatteryStatus(percentage=97, is_charging=False))
+        self.assertEqual(s3.percentage, 97)
+        s4 = engine._filter_battery_jitter(key, BatteryStatus(percentage=100, is_charging=False))
+        self.assertEqual(s4.percentage, 97)
 
     def test_discovery_and_custom_profile_generation(self):
         import tempfile
@@ -1347,7 +1377,33 @@ class TestAreYouLowBattery(unittest.TestCase):
              patch("time.sleep", side_effect=Stop):
             with self.assertRaises(Stop):
                 cli.run_daemon_loop()
-        engine.poll_all_devices.assert_called_once_with(in_game=True)
+        engine.poll_all_devices.assert_called_once_with(force=False, in_game=True)
+
+    def test_daemon_loop_forces_poll_after_topology_change(self):
+        import cli
+
+        engine = MagicMock()
+        engine.poll_all_devices.return_value = []
+
+        class Stop(Exception):
+            pass
+
+        # First signature is the baseline; the next check sees a USB plug/unplug event.
+        with patch.object(cli, "BatteryEngine", return_value=engine), \
+             patch.object(cli, "is_game_active", return_value=False), \
+             patch("areyoulowbattery.transport.get_hid_topology_signature", side_effect=["sig1", "sig2"]), \
+             patch("builtins.open", mock_open()), \
+             patch("os.replace"), \
+             patch("time.sleep", side_effect=[None, None, Stop]):
+            with self.assertRaises(Stop):
+                cli.run_daemon_loop()
+        self.assertEqual(
+            [c.kwargs for c in engine.poll_all_devices.call_args_list],
+            [
+                {"force": False, "in_game": False},
+                {"force": True, "in_game": False},
+            ],
+        )
 
     def test_windows_hidpp_survives_read_error_on_locked_collections(self):
         from areyoulowbattery.handlers.hidpp import LogitechHidppHandler
@@ -1588,6 +1644,175 @@ class TestAreYouLowBattery(unittest.TestCase):
                 st_fallback = handler.read_battery(dev, prof)
             self.assertEqual(st_fallback.percentage, 62)
             self.assertTrue(st_fallback.details.startswith("Live report: aa30"))
+        finally:
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
+
+
+    def test_yjx_usb_cable_forces_charging_even_with_stale_rf_frame(self):
+        handler = YjxHandler()
+        prof = self._yjx_profile()
+        dev = HidrawDevice("/dev/hidraw86", 0xA8A5, 0x2255, 2, "Smailwolf RS7")
+        cache_file = handler._cache_path(prof, dev)
+        if os.path.exists(cache_file):
+            os.remove(cache_file)
+
+        wired_mouse = HidrawDevice("/dev/hidraw85", 0xA8A4, 0x2255, 0, "YJX-CHIP USB MOUSE")
+        real_exists = os.path.exists
+
+        def fake_exists(path):
+            if path == dev.dev_path:
+                return True
+            return real_exists(path)
+
+        try:
+            # Stale RF frame: byte[9] = 0x00 (not charging), but the mouse is on the cable
+            with patch("areyoulowbattery.handlers.yjx.os.path.exists", side_effect=fake_exists), \
+                 patch("areyoulowbattery.handlers.yjx.enumerate_hidraw", return_value=[wired_mouse]), \
+                 patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.yjx.HidrawTransport", return_value=FakeTransport([YJX_RESPONSE_62])):
+                st = handler.read_battery(dev, prof)
+
+            self.assertTrue(st.is_connected)
+            self.assertEqual(st.percentage, 62)
+            self.assertTrue(st.is_charging)
+
+            # The charging state is persisted, so a silent receiver also reports charging
+            with patch("areyoulowbattery.handlers.yjx.os.path.exists", side_effect=fake_exists), \
+                 patch("areyoulowbattery.handlers.yjx.enumerate_hidraw", return_value=[wired_mouse]), \
+                 patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.yjx.HidrawTransport", return_value=FakeTransport([])):
+                st_cached = handler.read_battery(dev, prof)
+            self.assertEqual(st_cached.percentage, 62)
+            self.assertTrue(st_cached.is_charging)
+            self.assertTrue(st_cached.details.startswith("Cached ("))
+
+            # Without the wired node on the bus the RF frame stays authoritative
+            with patch("areyoulowbattery.handlers.yjx.os.path.exists", side_effect=fake_exists), \
+                 patch("areyoulowbattery.handlers.yjx.enumerate_hidraw",
+                       return_value=[HidrawDevice("/dev/hidraw84", 0xA8A5, 0x2255, 2, "YJX-CHIP USB_Receiver")]), \
+                 patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.yjx.HidrawTransport", return_value=FakeTransport([YJX_RESPONSE_62])):
+                st_unplugged = handler.read_battery(dev, prof)
+            self.assertEqual(st_unplugged.percentage, 62)
+            self.assertFalse(st_unplugged.is_charging)
+        finally:
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
+
+    @staticmethod
+    def _yjx_cable_setup():
+        receiver = HidrawDevice("/dev/hidraw86", 0xA8A5, 0x2255, 2, "Smailwolf RS7")
+        wired = HidrawDevice("/dev/hidraw85", 0xA8A4, 0x2255, 2, "YJX-CHIP USB MOUSE")
+        real_exists = os.path.exists
+
+        def fake_exists(path):
+            if path in (receiver.dev_path, wired.dev_path):
+                return True
+            return real_exists(path)
+
+        return receiver, wired, fake_exists
+
+    def test_yjx_reads_live_percentage_from_usb_cable_node(self):
+        handler = YjxHandler()
+        prof = self._yjx_profile()
+        receiver, wired, fake_exists = self._yjx_cable_setup()
+        cache_file = handler._cache_path(prof, receiver)
+        if os.path.exists(cache_file):
+            os.remove(cache_file)
+
+        cable_transport = FakeTransport([YJX_CABLE_LIVE_87_CHARGING])
+        frozen_transport = FakeTransport([YJX_RECEIVER_FROZEN_43])
+
+        def make_transport(path, read_only=False):
+            if path == wired.dev_path:
+                return cable_transport
+            return frozen_transport
+
+        try:
+            with patch("areyoulowbattery.handlers.yjx.os.path.exists", side_effect=fake_exists), \
+                 patch("areyoulowbattery.handlers.yjx.enumerate_hidraw", return_value=[receiver, wired]), \
+                 patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.yjx.HidrawTransport", side_effect=make_transport):
+                st = handler.read_battery(receiver, prof)
+
+            self.assertTrue(st.is_connected)
+            # The wired node carries the real, rising level (87%), not the frozen RF 43%
+            self.assertEqual(st.percentage, 87)
+            self.assertTrue(st.is_charging)
+            self.assertTrue(st.details.startswith("Live report (USB cable): aa30a50b"))
+            # Only the documented query is ever written, and only to the wired node
+            self.assertEqual(cable_transport.sent_outputs, [QUERY_PAYLOAD])
+            self.assertEqual(cable_transport.sent_features, [])
+            self.assertEqual(frozen_transport.sent_outputs, [])
+        finally:
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
+
+    def test_yjx_cable_permission_denied_falls_back_to_receiver(self):
+        handler = YjxHandler()
+        prof = self._yjx_profile()
+        receiver, wired, fake_exists = self._yjx_cable_setup()
+        cache_file = handler._cache_path(prof, receiver)
+        if os.path.exists(cache_file):
+            os.remove(cache_file)
+
+        class DeniedTransport(FakeTransport):
+            def __init__(self, path, read_only=False):
+                super().__init__([])
+
+            def open(self):
+                raise PermissionError("no udev rule for the wired node")
+
+        frozen_transport = FakeTransport([YJX_RECEIVER_FROZEN_43])
+
+        def make_transport(path, read_only=False):
+            if path == wired.dev_path:
+                return DeniedTransport(path)
+            return frozen_transport
+
+        try:
+            with patch("areyoulowbattery.handlers.yjx.os.path.exists", side_effect=fake_exists), \
+                 patch("areyoulowbattery.handlers.yjx.enumerate_hidraw", return_value=[receiver, wired]), \
+                 patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.yjx.HidrawTransport", side_effect=make_transport):
+                st = handler.read_battery(receiver, prof)
+
+            # Receiver frame is stale (43%) but the cable presence still forces "charging"
+            self.assertEqual(st.percentage, 43)
+            self.assertTrue(st.is_charging)
+            self.assertTrue(st.details.startswith("Live report: aa30"))
+            self.assertEqual(frozen_transport.sent_outputs, [QUERY_PAYLOAD])
+        finally:
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
+
+    def test_yjx_silent_cable_node_falls_back_to_receiver(self):
+        handler = YjxHandler()
+        prof = self._yjx_profile()
+        receiver, wired, fake_exists = self._yjx_cable_setup()
+        cache_file = handler._cache_path(prof, receiver)
+        if os.path.exists(cache_file):
+            os.remove(cache_file)
+
+        silent_transport = FakeTransport([])
+        frozen_transport = FakeTransport([YJX_RECEIVER_FROZEN_43])
+
+        def make_transport(path, read_only=False):
+            if path == wired.dev_path:
+                return silent_transport
+            return frozen_transport
+
+        try:
+            with patch("areyoulowbattery.handlers.yjx.os.path.exists", side_effect=fake_exists), \
+                 patch("areyoulowbattery.handlers.yjx.enumerate_hidraw", return_value=[receiver, wired]), \
+                 patch.object(handler, "_drain_input", return_value=None), \
+                 patch("areyoulowbattery.handlers.yjx.HidrawTransport", side_effect=make_transport):
+                st = handler.read_battery(receiver, prof)
+
+            self.assertEqual(st.percentage, 43)
+            self.assertTrue(st.is_charging)
+            self.assertTrue(st.details.startswith("Live report: aa30"))
         finally:
             if os.path.exists(cache_file):
                 os.remove(cache_file)

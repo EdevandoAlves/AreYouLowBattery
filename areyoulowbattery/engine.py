@@ -286,8 +286,9 @@ class BatteryEngine:
         """
         Anti-jitter filter for discharging peripherals:
         Suppresses momentary upward voltage spikes caused by RGB LEDs turning off (voltage sag bounce).
-        Allows immediate downward updates, staleness resets (> 3 min), charging updates,
-        or sustained (> 60s) higher readings from external chargers.
+        Allows immediate downward updates, staleness resets (> 3 min), charging updates, the first
+        reading after unplugging the charger (was_charging), or sustained (> 60s) higher readings
+        from external chargers.
         """
         if (
             status.percentage is None
@@ -307,18 +308,21 @@ class BatteryEngine:
                 "timestamp": now,
                 "spike_val": None,
                 "spike_ts": None,
+                "was_charging": status.is_charging,
             }
             return status
 
         last_lvl = hist["level"]
         last_ts = hist["timestamp"]
 
-        # If device is charging, accept immediate upward reading
-        if status.is_charging:
+        # Charging is authoritative, and so is the very first reading taken right after
+        # unplugging: a real 43% -> 100% jump must never wait behind the 60s spike guard.
+        if status.is_charging or hist.get("was_charging"):
             hist["level"] = raw_pct
             hist["timestamp"] = now
             hist["spike_val"] = None
             hist["spike_ts"] = None
+            hist["was_charging"] = status.is_charging
             return status
 
         # If the device was off or disconnected for > 3 minutes, accept fresh reading
@@ -327,6 +331,7 @@ class BatteryEngine:
             hist["timestamp"] = now
             hist["spike_val"] = None
             hist["spike_ts"] = None
+            hist["was_charging"] = status.is_charging
             return status
 
         # Normal discharge (going down or holding steady): accept immediately
@@ -335,6 +340,7 @@ class BatteryEngine:
             hist["timestamp"] = now
             hist["spike_val"] = None
             hist["spike_ts"] = None
+            hist["was_charging"] = status.is_charging
             return status
 
         # Upward spike while discharging (e.g. RGB LEDs turned off -> voltage bounce):
@@ -345,6 +351,7 @@ class BatteryEngine:
                 hist["timestamp"] = now
                 hist["spike_val"] = None
                 hist["spike_ts"] = None
+                hist["was_charging"] = status.is_charging
                 return status
         else:
             hist["spike_val"] = raw_pct
